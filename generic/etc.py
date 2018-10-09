@@ -12,6 +12,7 @@ import sqlite3
 
 import numpy as np
 
+import io
 from io import BytesIO
 from ..debugging import DebugPlot
 
@@ -19,7 +20,6 @@ try:
     import tqdm
 except ImportError:
     tqdm = None
-
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,6 @@ def ignorant_next(iterable):
 
 
 class QuickTableDumper(object):
-
     """
 
     :param recipient:
@@ -151,9 +150,8 @@ class QuickTableDumper(object):
         """
         if len(self.headers) == 0:
             self.headers = list(sorted(row.keys()))
-            self.write_list(self.headers)
-
-        self.write_list(row[k] for k in self.headers)
+            self.write_list(self.headers)  # uncomment if you want to display  data for cells at console
+        self.write_list(row[k] for k in self.headers)  # uncomment if you want to display  data for cells at console
 
     def stringify(self, obj):
         """
@@ -437,6 +435,7 @@ class FileCache(BaseCache):
     """
     A caching class which stores the data in flat files.
     """
+
     def build_cache_filename(self, suffix):
         """
 
@@ -479,6 +478,7 @@ class Sqlite3Cache(BaseCache):
     """
     A caching class which stores the data in a sqlite3 database.
     """
+
     def contains(self, key):
         """
 
@@ -524,19 +524,54 @@ class Sqlite3Cache(BaseCache):
 
         self.conn.commit()
 
+    def set_image(self, pos, chan_num, timepoint, fluorescences_count, value):
+        key = str(pos) + ',' + str(chan_num) + ',' + str(timepoint) + ',' + str(fluorescences_count);
+        self.conn.execute('DELETE FROM images WHERE name = ?', (key,));
+        self.conn.execute('INSERT INTO images (name, value) VALUES (?, ?)', (key, value), );
+        self.conn.commit();
+
+    def get_image(self, pos, chan_num, timepoint, fluorescences_count):
+        key = str(pos) + ',' + str(chan_num) + ',' + str(timepoint) + ',' + str(fluorescences_count);
+        result = self.conn.execute('SELECT value FROM images WHERE name = ?', (key,))
+        for row in result:
+            return row[0]
+
     def __init__(self, *args, **kwargs):
         super(Sqlite3Cache, self).__init__(*args, **kwargs)
+
+        def adapt_array(arr):
+            """
+            http://stackoverflow.com/a/31312102/190597 (SoulNibbler)
+            """
+
+            out = io.BytesIO()
+            np.save(out, arr)
+            out.seek(0)
+            return sqlite3.Binary(out.read())
+
+        def convert_array(text):
+            out = io.BytesIO(text)
+            out.seek(0)
+            return np.load(out)
 
         self.conn = None
 
         if self.ignore_cache is not True:
-            self.conn = sqlite3.connect('%s.sq3.cache' % (self.cache_token, ))
+            self.conn = sqlite3.connect('%s.sq3.cache' % (self.cache_token,), detect_types=sqlite3.PARSE_DECLTYPES)
             self.conn.isolation_level = None
             self.conn.execute('PRAGMA journal_mode = WAL')
             self.conn.execute('PRAGMA synchronous = NORMAL')
             self.conn.isolation_level = 'DEFERRED'
             self.conn.execute('CREATE TABLE IF NOT EXISTS entries (name TEXT, value BLOB)')
             self.conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS entries_name ON entries (name)')
+
+            # Converts np.array to TEXT when inserting
+            sqlite3.register_adapter(np.ndarray, adapt_array)
+
+            # Converts TEXT to np.array when selecting
+            sqlite3.register_converter("array", convert_array)
+
+            self.conn.execute('CREATE TABLE IF NOT EXISTS images (name TEXT, value array)')
 
     def __del__(self):
         if self.conn:
@@ -549,6 +584,7 @@ class NotReallyATree(list):
         for (c)KDTrees. It can be used to find the nearest matching point to a query point.
         (And does that by exhaustive search...)
     """
+
     def __init__(self, iterable):
         """
         :param iterable: input data

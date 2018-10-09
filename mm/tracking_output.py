@@ -50,7 +50,6 @@ def s_to_h(s):
     """
     return s / (60.0 * 60.0)
 
-
 # noinspection PyUnusedLocal
 def s_to_h_str(s, *args, **kwargs):
     """
@@ -117,6 +116,7 @@ def plot_timeline(p, channels, cells,
     min_h = float('inf')
     max_h = 0
 
+    #import pdb;pdb.set_trace()
     for cc in channels:
         time_point = cc.image.timepoint
         bs = np.searchsorted(time_points, time_point, side='right')
@@ -305,7 +305,7 @@ def analyze_tracking(cells, receptor, meta=None):
         for sn, sa in enumerate(cell.seen_as):
             tmp = {
                 'cell_age': s_to_h(sa.channel.image.timepoint - cell.seen_as[0].channel.image.timepoint),
-                'elongation_rate': catch_index_error(lambda: cell.raw_elongation_rates[sn], float('NaN')),
+                'elongation_rate': sa.channel.image.pixel_to_mu(catch_index_error(lambda: cell.raw_elongation_rates[sn], float('NaN'))),
                 'length': sa.channel.image.pixel_to_mu(sa.length),
                 'uid_track': get_object_unique_id(cell.ultimate_parent),
                 'uid_thiscell': get_object_unique_id(sa),
@@ -332,10 +332,15 @@ def analyze_tracking(cells, receptor, meta=None):
                 'fluorescence_count': len(getattr(sa, 'fluorescences', []))
             }
 
+
+
             for f in range(len(getattr(sa, 'fluorescences', []))):
-                tmp['fluorescence_' + str(f)] = sa.fluorescences[f]
+                tmp['fluorescence_mean_' + str(f)] = sa.fluorescences[f]
+                tmp['fluorescence_total_' + str(f)] = sa.fluorescences_in_total[f]
+                tmp['fluorescences_region_size_num_' + str(f)] = sa.fluorescences_region_size_num[f]
                 tmp['fluorescence_raw_' + str(f)] = sa.fluorescences_raw[f]
                 tmp['fluorescence_std_' + str(f)] = sa.fluorescences_std[f]
                 tmp['fluorescence_background_' + str(f)] = sa.channel.image.background_fluorescences[f]
 
             receptor(tmp)
+

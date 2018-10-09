@@ -102,3 +102,56 @@ def shift_image(image, shift, background='input'):
         source_horizontal_lower:source_horizontal_upper
     ]
     return new_image
+
+
+def shift_image_only_horizontal(image, shift, background='input'):
+    """
+
+    :param image:
+    :param shift:
+    :param background:
+    :return: :raise ValueError:
+    """
+
+    vertical, horizontal = shift
+    vertical, horizontal = round(vertical), round(horizontal)
+    vertical=0
+    height, width = image.shape
+
+    if vertical < 0:
+        source_vertical_lower = -vertical
+        source_vertical_upper = height
+        destination_vertical_lower = 0
+        destination_vertical_upper = vertical
+    else:
+        source_vertical_lower = 0
+        source_vertical_upper = height - vertical
+        destination_vertical_lower = vertical
+        destination_vertical_upper = height
+
+    if horizontal < 0:
+        source_horizontal_lower = -horizontal
+        source_horizontal_upper = width
+        destination_horizontal_lower = 0
+        destination_horizontal_upper = horizontal
+    else:
+        source_horizontal_lower = 0
+        source_horizontal_upper = width - horizontal
+        destination_horizontal_lower = horizontal
+        destination_horizontal_upper = width
+
+    if background == 'input':
+        new_image = image.copy()
+    elif background == 'blank':
+        new_image = np.zeros_like(image)
+    else:
+        raise ValueError("Unsupported background method passed. Use background or blank.")
+
+    new_image[
+        destination_vertical_lower:destination_vertical_upper,
+        destination_horizontal_lower:destination_horizontal_upper
+    ] = image[
+        source_vertical_lower:source_vertical_upper,
+        source_horizontal_lower:source_horizontal_upper
+    ]
+    return new_image

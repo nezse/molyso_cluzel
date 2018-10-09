@@ -97,6 +97,7 @@ class TrackedCell(object):
 
     :param tracker:
     """
+
     __slots__ = ['tracker', 'parent', 'children', 'seen_as', 'raw_elongation_rates', 'raw_trajectories']
 
     def __init__(self, tracker):
@@ -180,9 +181,10 @@ class TrackedCell(object):
 
             assert (current != previous)
 
-            self.raw_elongation_rates.append(
-                (current.length - previous.length) /
-                (current.channel.image.timepoint - previous.channel.image.timepoint))
+            elrate = (current.length - previous.length) / (current.channel.image.timepoint - previous.channel.image.timepoint)
+
+            self.raw_elongation_rates.append(elrate)
+
             self.raw_trajectories.append(
                 (current.centroid_1d - previous.centroid_1d) /
                 (current.channel.image.timepoint - previous.channel.image.timepoint))
@@ -241,16 +243,19 @@ class CellCrossingCheckingGlobalDuoOptimizerQueue(object):
         ordered_a = list(sorted(self.set_a))
         ordered_b = list(sorted(self.set_b))
 
+
         lookup_a = {i: n for n, i in enumerate(ordered_a)}
         lookup_b = {i: n for n, i in enumerate(ordered_b)}
 
-        len_a = len(ordered_a)
-        len_b = len(ordered_b)
+        len_a = len(ordered_a)#6
+        len_b = len(ordered_b)#6
+
 
         rows = len(self.data)
         cols = len(ordered_a) + len(ordered_b)
 
         matrix = np.zeros((rows, cols,), dtype=bool)
+        # print("************", rows)
 
         dependencies = np.zeros((rows, len_a, len_b,), dtype=int)
 
@@ -259,19 +264,21 @@ class CellCrossingCheckingGlobalDuoOptimizerQueue(object):
         data = sorted(self.data, key=lambda x: (x[0], x[1][0], x[1][1]))
 
         for i, (cost, (involved_a, involved_b, what)) in enumerate(data):
-
+            # print("i ", i, cost)
             for a in involved_a:
+                # print( "\t", lookup_a[a])
                 matrix[i, lookup_a[a]] = True
 
             for b in involved_b:
                 matrix[i, lookup_b[b] + len_a] = True
+                # print("\t", lookup_b[b] + len_a)
 
             for a in involved_a:
                 for b in involved_b:
                     dependencies[i, lookup_a[a], lookup_b[b]] = 1
 
             costs[i] = cost
-
+        # print("\n")
         def crossing_check(used_rows, row_to_add):
             """
 
@@ -312,5 +319,8 @@ class CellCrossingCheckingGlobalDuoOptimizerQueue(object):
                     (next(iter(involved_a)) if len(involved_a) == 1 else list(involved_a))
                 involved_b = None if len(involved_b) == 0 else \
                     (next(iter(involved_b)) if len(involved_b) == 1 else list(involved_b))
-
                 what(involved_a, involved_b)
+
+
+
+

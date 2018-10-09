@@ -9,6 +9,11 @@ import numpy as np
 
 from .tracking_output import s_to_h
 from ..generic.etc import QuickTableDumper
+from enum import Enum;
+from numpy.linalg import norm;
+from math import floor, ceil, hypot;
+from ..BayesianCorrection.WithinCellCycleBayesianCellSegmentation import \
+    WithinCellCycleBayesianCellSegmentation;
 
 try:
     # noinspection PyUnresolvedReferences
@@ -28,11 +33,25 @@ def interactive_ground_truth_main(args, tracked_results):
     :return: :raise SystemExit:
     """
 
+    class Mode(Enum):
+        Default = 0
+        UpperPosition = 1
+        LowerPosition = 2
+        AllUpperPosition = 3
+        AllLowerPosition = 4
+        RectangleSelector = 5
+        RectangleSelectorErased = 6
+        SemiAutomaticCorrectionManualRange = 7
+
+    pos = args.positions_to_process[0];
+    assert (len(args.positions_to_process) == 1);
+
+    mode = Mode(Mode.Default);
+
     acceptable_pos_chans = \
         {p: list(range(len(tracked_results[list(tracked_results.keys())[p]].channel_accumulator.keys())))
-         for p
-         in range(len(tracked_results.keys()))
-         if len(tracked_results[list(tracked_results.keys())[p]].channel_accumulator.keys()) > 0}
+         for p in range(len(tracked_results.keys())) if
+         len(tracked_results[list(tracked_results.keys())[p]].channel_accumulator.keys()) > 0}
 
     def plots_info():
         """
@@ -60,13 +79,22 @@ def interactive_ground_truth_main(args, tracked_results):
 
         """
         with open(ground_truth_data, 'wb+') as inner_fp:
-            pickle.dump(all_envs, inner_fp, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump(all_envs, inner_fp)
             print("Saved data to %s" % (ground_truth_data,))
 
     lowest_position = min(acceptable_pos_chans.keys())
     highest_position = max(acceptable_pos_chans.keys())
 
     next_dataset = [lowest_position, next(iter(acceptable_pos_chans[lowest_position]))]
+
+    # loop controller
+    toContinue = {};
+    toContinue['value'] = True;
+
+    # rectangle selection recorder
+    cnum = list(tracked_results[pos].channel_accumulator.keys())[0];
+    rectangle_selection_top_recorder = [False] * (len(tracked_results[pos].channel_accumulator[cnum]));
+    rectangle_selection_bottom_recorder = [False] * (len(tracked_results[pos].channel_accumulator[cnum]));
 
     def perform_it():
         """
@@ -130,44 +158,95 @@ def interactive_ground_truth_main(args, tracked_results):
         for n, cc in enumerate(channels):
             lower_border = int(np.floor(data[n, n_top] - low))
             large_image[
-                lower_border:int(lower_border + data[n, n_height]),
-                int(data[n, n_width_cumsum] - data[n, n_width]):int(data[n, n_width_cumsum])
+            lower_border:int(lower_border + data[n, n_height]),
+            int(data[n, n_width_cumsum] - data[n, n_width]):int(data[n, n_width_cumsum])
             ] = cc.channel_image
 
         import matplotlib.pyplot as plt
 
-        fig, ax = plt.subplots()
+        # import pdb;pdb.set_trace()
+        # plt.clf();
+        # fig, ax = plt.subplots()
+        fig = plt.figure(figsize=(50, 5))
+        ax = fig.add_axes([.1, .1, .85, .85])
 
-        plt.subplots_adjust(left=0.25, bottom=0.25)
+        # plt.subplots_adjust(left=0.25, bottom=0.25)
+        # plt.subplots_adjust(top=0.9)
 
-        fig.canvas.set_window_title("Image Viewer")
+        cnum = list(tracked_results[pos].channel_accumulator.keys())[0];
+        if len(tracked_results[0].channel_accumulator[cnum]) == len(args.timepoints_to_process):
+            fig.canvas.set_window_title("Default mode: channel " + str(chan_num))
+        else:
+            fig.canvas.set_window_title("Certain frames were excluded from analysis: channel " + str(chan_num))
 
         channels_per_inch = 5.0
-        plt.rcParams['figure.figsize'] = (len(channels) / channels_per_inch, 4.0)
-        plt.rcParams['figure.dpi'] = 150
+        # plt.rcParams['figure.figsize'] = (len(channels) / channels_per_inch, 4.0)
+        plt.rcParams['figure.figsize'] = [50, 5];
+        # plt.rcParams['figure.dpi'] = 600;
 
-        plt.rcParams['figure.subplot.top'] = 0.8
-        plt.rcParams['figure.subplot.bottom'] = 0.2
-        plt.rcParams['figure.subplot.left'] = 0.2
-        plt.rcParams['figure.subplot.right'] = 0.8
+        # plt.rcParams['figure.subplot.top'] = 0.8
+        # plt.rcParams['figure.subplot.bottom'] = 0.2
+        # plt.rcParams['figure.subplot.left'] = 0.2
+        # plt.rcParams['figure.subplot.right'] = 0.8
 
         plt.rcParams['image.cmap'] = 'gray'
 
-        plt.imshow(large_image)
+        # zoom = 5;
+        # ax.rcParams["figure.figsize"] = [fig.get_figwidth() * zoom, fig.get_figheight() * zoom];
 
-        plt.title("Ground Truth — Position %d, channel %d" % (pos, chan_num,))
+        def x_coordinate_to_timepoint(x, to_integer):
 
-        plt.xlabel("x [Pixel]")
-        plt.ylabel("y [Pixel]")
+            # the ordinary case: all timepoints are under processing
+            timepoint = int(to_integer(x / data[0, n_width] - 0.5));
+            if timepoint < len(tracked_results[pos].channel_accumulator[chan_num]):
+                if data[timepoint - 1, n_width_cumsum] <= x <= data[timepoint, n_width_cumsum]:
+                    return timepoint;
 
-        fig.tight_layout()
+            timepoint = [];
 
-        o_scatter = ax.scatter(0, 0)
-        o_lines, = plt.plot(0, 0)
+            for timepoint, channel in enumerate(tracked_results[pos].channel_accumulator[chan_num]):
+                if data[timepoint, n_width_cumsum] >= x:
+                    return timepoint;
+
+        def timepoint_to_x_coordinate(timepoint):
+            # x = (timepoint + 0.5) * 8;
+            # return x;
+            return data[timepoint, n_width_cumsum] - 0.5 * data[timepoint, n_width];
+
+        plotBottom = [];
+        plotTop = [];
+        plotSelection = [];
+
+        def show_cell_bounaries():
+
+            xPos = [None] * (len(tracked_results[pos].channel_accumulator[chan_num]));
+            bottom = [None] * (len(tracked_results[pos].channel_accumulator[chan_num]));
+            top = [None] * (len(tracked_results[pos].channel_accumulator[chan_num]));
+
+            for timepoint, channel in enumerate(tracked_results[pos].channel_accumulator[chan_num]):
+
+                xPos[timepoint] = timepoint_to_x_coordinate(timepoint);
+
+                if channel.cells.cells_list:
+                    bottom[timepoint] = channel.cells.cells_list[0].local_bottom;
+                    top[timepoint] = channel.cells.cells_list[0].local_top;
+
+            nonlocal plotBottom;
+            nonlocal plotTop;
+            plotBottom, = plt.plot(xPos, bottom, "r+");
+            plotTop, = plt.plot(xPos, top, "b+");
+
+        plt.imshow(large_image, aspect='auto', interpolation='none')
+        show_cell_bounaries();
+
+        # fig.tight_layout()
+
+        o_scatter = ax.scatter([], [])
+        o_lines, = plt.plot([], [])
 
         def refresh():
             """
-            Refreshes the overlay.
+            Refreshs the overlay.
 
             """
             o_lines.set_data(env['points'][:env['used'], 0], env['points'][:env['used'], 1])
@@ -197,11 +276,22 @@ def interactive_ground_truth_main(args, tracked_results):
                     (to previously specified filename)
             i       start interactive python console
             q       quit ground truth mode
+
+            t        edit upper bound of a cell; twice to exit current mode
+            ctrl + t edit upper bound of all cells; twice to exit current mode
+            b        edit lower bound of a cell; twice to exit current mode
+            ctrl + b edit lower bound of all cells; twice to exit current mode
+            ctrl + r rectangle selector mode
+
+            1        semi-automatic correction with manual range
+            2        modify parameters for semi-automatic correction
             """)
 
         refresh()
 
         show_help()
+
+        semiAutomaticCorrection_varianceOfGrowth = 0.12;
 
         def click(e):
             """
@@ -209,10 +299,131 @@ def interactive_ground_truth_main(args, tracked_results):
             :param e:
             :return:
             """
+
             x, y = e.xdata, e.ydata
             if x is None or y is None:
                 return
-            if e.button == 3:
+
+            nonlocal plotBottom;
+            nonlocal plotTop;
+
+            if e.button == 1:
+                if mode == Mode.UpperPosition:
+
+                    timepoint = x_coordinate_to_timepoint(x, round);
+                    tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[0].local_top = y;
+                    plotTop.remove();
+                    plotBottom.remove();
+                    show_cell_bounaries();
+                    return;
+
+                elif mode == Mode.LowerPosition:
+
+                    timepoint = x_coordinate_to_timepoint(x, round);
+                    tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[0].local_bottom = y;
+                    plotTop.remove();
+                    plotBottom.remove();
+                    show_cell_bounaries();
+                    return;
+
+                elif mode == Mode.AllUpperPosition:
+
+                    for timepoint, channel in enumerate(tracked_results[pos].channel_accumulator[chan_num]):
+                        channel.cells.cells_list[0].local_top = y;
+                    plotTop.remove();
+                    show_cell_bounaries();
+                    return;
+
+                elif mode == Mode.AllLowerPosition:
+
+                    for timepoint, channel in enumerate(tracked_results[pos].channel_accumulator[chan_num]):
+                        channel.cells.cells_list[0].local_bottom = y;
+                    plotBottom.remove();
+                    show_cell_bounaries();
+                    return;
+
+                elif mode == Mode.RectangleSelector:
+
+                    selectedXPositions, selectedYPositions = points_by_rectangle_selection();
+                    minDistance = 1e10;
+                    minPosX = [];
+                    minPosY = [];
+                    for selectedXPosition, selectedYPosition in zip(selectedXPositions, selectedYPositions):
+                        distance = hypot(x - selectedXPosition, y - selectedYPosition);
+                        if (minDistance != min(minDistance, distance)):
+                            minDistance = min(minDistance, distance);
+                            minPosX = selectedXPosition;
+                            minPosY = selectedYPosition;
+
+                    print(minPosX, minPosY);
+
+                    # update this in cell boundaries
+                    distanceToChange = y - selectedYPosition;
+                    for selectedXPosition, selectedYPosition in zip(selectedXPositions, selectedYPositions):
+                        timepoint = x_coordinate_to_timepoint(selectedXPosition, round);
+                        if (tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[
+                            0].local_top == selectedYPosition):
+                            tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[
+                                0].local_top += distanceToChange;
+                        if (tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[
+                            0].local_bottom == selectedYPosition):
+                            tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[
+                                0].local_bottom += distanceToChange;
+                    plotTop.remove();
+                    plotBottom.remove();
+                    show_cell_bounaries();
+
+                elif mode == Mode.SemiAutomaticCorrectionManualRange:
+
+                    numOfEachSideSelection = 10;
+                    iteration = 100;
+                    minGrowthRate = 0.3;
+                    maxGrowthRate = 0.55;
+
+                    nonlocal semiAutomaticCorrection_varianceOfGrowth;
+                    varianceOfGrowth = semiAutomaticCorrection_varianceOfGrowth;
+
+                    startTimepoint = x_coordinate_to_timepoint(x, round);
+                    tracked_results[pos].channel_accumulator[chan_num][startTimepoint].cells.cells_list[
+                        0].local_bottom = y;
+
+                    timeInterval = (tracked_results[pos].channel_accumulator[chan_num][
+                                        startTimepoint + 1].image.timepoint -
+                                    tracked_results[pos].channel_accumulator[chan_num][
+                                        startTimepoint].image.timepoint) / 60 / 60;
+                    pixelToLength = tracked_results[pos].channel_accumulator[chan_num][
+                        startTimepoint].image.calibration_px_to_mu;
+                    print(timeInterval, pixelToLength);
+
+                    lowerBound = max(startTimepoint - numOfEachSideSelection, 0);
+                    upperBound = min(startTimepoint + numOfEachSideSelection,
+                                     len(tracked_results[pos].channel_accumulator[chan_num]) - 1);
+                    rangeOfCell = range(lowerBound, upperBound + 1);
+
+                    observedLength = [0] * len(rangeOfCell);
+                    for i in range(len(rangeOfCell)):
+                        timepoint = rangeOfCell[i];
+                        observedLength[i] = (tracked_results[pos].channel_accumulator[chan_num][
+                                                 timepoint].cells.cells_list[0].local_bottom -
+                                             tracked_results[pos].channel_accumulator[chan_num][
+                                                 timepoint].cells.cells_list[0].local_top) * pixelToLength;
+
+                    estimator = WithinCellCycleBayesianCellSegmentation(varianceOfGrowth, timeInterval, minGrowthRate,
+                                                                        maxGrowthRate);
+                    inferredLength = estimator.Inference(observedLength, iteration);
+
+                    for i in range(len(rangeOfCell)):
+                        timepoint = rangeOfCell[i];
+                        tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[0].local_bottom = \
+                        tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[0].local_top + \
+                        inferredLength[i] / pixelToLength;
+
+                    plotBottom.remove();
+                    show_cell_bounaries();
+
+                    print("varianceOfGrowth: ", varianceOfGrowth);
+
+            elif e.button == 3:
                 last_point_x, last_point_y = env['last_point_x'], env['last_point_y']
 
                 if last_point_x is not None:
@@ -248,12 +459,26 @@ def interactive_ground_truth_main(args, tracked_results):
                 else:
                     env['last_point_x'], env['last_point_y'] = x, y
 
+        def ModeToggleSwitch(mode, targetMode, title):
+            if mode == targetMode:
+                mode = Mode.Default
+                cnum = list(tracked_results[pos].channel_accumulator.keys())[0];
+                if len(tracked_results[0].channel_accumulator[cnum]) == len(args.timepoints_to_process):
+                    fig.canvas.set_window_title("Default mode: channel " + str(chan_num))
+                else:
+                    fig.canvas.set_window_title("Certain frames were excluded from analysis: channel " + str(chan_num))
+            else:
+                mode = targetMode
+                fig.canvas.set_window_title(title)
+            return mode;
+
         def key_press(event):
             """
 
             :param event:
             :return: :raise SystemExit:
             """
+            nonlocal mode;
 
             def show_stats():
                 """
@@ -274,7 +499,7 @@ def interactive_ground_truth_main(args, tracked_results):
                 :param c:
                 :return:
                 """
-
+                # import pdb;pdb.set_trace()
                 next_pos, next_chan = next_dataset
 
                 if p == 1:
@@ -293,12 +518,12 @@ def interactive_ground_truth_main(args, tracked_results):
                     next_chan = acceptable_pos_chans[next_pos + p][0]
 
                 if c == 1:
-                    while (next_chan + c) not in acceptable_pos_chans[next_pos + p] and \
-                            (next_chan + c) < max(acceptable_pos_chans[next_pos + p]):
+                    while (next_chan + c) not in acceptable_pos_chans[next_pos + p] and (next_chan + c) < max(
+                            acceptable_pos_chans[next_pos + p]):
                         c += 1
                 elif c == -1:
-                    while (next_chan + c) not in acceptable_pos_chans[next_pos + p] and \
-                            (next_chan + c) > min(acceptable_pos_chans[next_pos + p]):
+                    while (next_chan + c) not in acceptable_pos_chans[next_pos + p] and (next_chan + c) > min(
+                            acceptable_pos_chans[next_pos + p]):
                         c -= 1
 
                 if (next_chan + c) not in acceptable_pos_chans[next_pos + p]:
@@ -354,7 +579,6 @@ def interactive_ground_truth_main(args, tracked_results):
                     mu = np.log(2) / (deltas / (60.0 * 60.0))
 
                     for num in range(len(mu)):
-
                         out.add({
                             'position': x_pos,
                             'channel': x_chan,
@@ -371,13 +595,124 @@ def interactive_ground_truth_main(args, tracked_results):
                 import code
                 code.InteractiveConsole(locals=globals()).interact()
             elif event.key == 'q':
-                raise SystemExit
+                # exit the current loop
+                toContinue['value'] = False;
+                return;
+            elif event.key == 't':
+                mode = ModeToggleSwitch(mode, Mode.UpperPosition, "Editing cell upper bounday");
+            elif event.key == 'b':
+                mode = ModeToggleSwitch(mode, Mode.LowerPosition, "Editing cell bottom bounday");
+            elif event.key == 'ctrl+t':
+                mode = ModeToggleSwitch(mode, Mode.AllUpperPosition, "Editing ALL cells' upper bounday");
+            elif event.key == 'ctrl+b':
+                mode = ModeToggleSwitch(mode, Mode.AllLowerPosition, "Editing ALL cells' bottom bounday");
+            elif event.key == 'ctrl+r':
+                mode = ModeToggleSwitch(mode, Mode.RectangleSelector, "Rectangle Selector");
+            elif event.key == 'ctrl+e':
+
+                mode = ModeToggleSwitch(mode, Mode.RectangleSelectorErased, "Rectangle Selector Erased.");
+                # reset rectangle selection recorder
+                nonlocal rectangle_selection_top_recorder;
+                nonlocal rectangle_selection_bottom_recorder;
+
+                rectangle_selection_top_recorder = [False] * (len(tracked_results[pos].channel_accumulator[chan_num]));
+                rectangle_selection_bottom_recorder = [False] * (
+                    len(tracked_results[pos].channel_accumulator[chan_num]));
+
+                nonlocal plotSelection;
+                if plotSelection:
+                    plotSelection.remove();
+                    plotSelection, = plt.plot(0, 0);
+                    return;
+            elif event.key == '1':
+                mode = ModeToggleSwitch(mode, Mode.SemiAutomaticCorrectionManualRange,
+                                        "Semi-automatic Correction with Manual Range.");
+            elif event.key == '2':
+                nonlocal semiAutomaticCorrection_varianceOfGrowth;
+                semiAutomaticCorrection_varianceOfGrowth = float(input("Please enter varianceOfGrowth: "));
+
+            toContinue['value'] = True;
+
+        def test_release(erelease):
+            x2, y2 = erelease.xdata, erelease.ydata
+            print(x2, y2)
+
+        def points_by_rectangle_selection():
+
+            nonlocal rectangle_selection_top_recorder;
+            nonlocal rectangle_selection_bottom_recorder;
+
+            x = [];
+            y = [];
+
+            for timepoint, channel in enumerate(tracked_results[pos].channel_accumulator[chan_num]):
+                if rectangle_selection_top_recorder[timepoint]:
+                    xPos = timepoint_to_x_coordinate(timepoint);
+                    x.append(xPos);
+                    y.append(channel.cells.cells_list[0].local_top);
+                    print('U', timepoint);
+                if rectangle_selection_bottom_recorder[timepoint]:
+                    xPos = timepoint_to_x_coordinate(timepoint);
+                    x.append(xPos);
+                    y.append(channel.cells.cells_list[0].local_bottom);
+                    print('B', timepoint);
+            return (x, y);
+
+        def rectangle_selection(epress, erelease):
+
+            x, y = epress.xdata, epress.ydata;
+            x2, y2 = erelease.xdata, erelease.ydata
+
+            nonlocal mode;
+            if mode == Mode.RectangleSelector:
+                print(x, y, x2, y2)
+
+                nonlocal rectangle_selection_top_recorder;
+                nonlocal rectangle_selection_bottom_recorder;
+
+                leftBoundary = max(0, x_coordinate_to_timepoint(x, round));
+                rightBoundary = min(len(tracked_results[pos].channel_accumulator[chan_num]),
+                                    x_coordinate_to_timepoint(x2, ceil)) + 1;
+
+                print(leftBoundary, rightBoundary);
+
+                for timepoint in range(leftBoundary, rightBoundary):
+
+                    top = tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[0].local_top;
+
+                    if (y <= top <= y2):
+                        rectangle_selection_top_recorder[timepoint] = not rectangle_selection_top_recorder[timepoint];
+
+                    bottom = tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[
+                        0].local_bottom;
+
+                    if (y <= bottom <= y2):
+                        rectangle_selection_bottom_recorder[timepoint] = not rectangle_selection_bottom_recorder[
+                            timepoint];
+
+                xPos, yPos = points_by_rectangle_selection();
+
+                nonlocal plotSelection;
+                if plotSelection:
+                    plotSelection.remove();
+                plotSelection, = plt.plot(xPos, yPos, 'ko', markerfacecolor='None');
+
+        from matplotlib.widgets import RectangleSelector
+
+        click.RS = RectangleSelector(ax, rectangle_selection,
+                                     drawtype='box', useblit=True,
+                                     button=[1, 3],  # don't use middle button
+                                     minspanx=5, minspany=5,
+                                     spancoords='pixels',
+                                     interactive=True)
 
         fig.canvas.mpl_connect('key_press_event', key_press)
+        # fig.canvas.mpl_connect('button_release_event', test_release)
         fig.canvas.mpl_connect('button_press_event', click)
 
         plt.show()
 
-    while True:
-        perform_it()
+    while toContinue['value']:
+        perform_it();
 
+    return tracked_results;
