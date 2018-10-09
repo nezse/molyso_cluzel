@@ -41,7 +41,7 @@ class TrackedPosition(object):
     A TrackedPosition object contains various CellTracker objects for each channel within a multipoint position,
     as well as other information associated with the position.
     """
-
+    # print("tracking / TrackedPosition ***********************************")
     def __init__(self):
         self.times = None
         self.n = 0
@@ -164,33 +164,40 @@ class TrackedPosition(object):
 
         """
         for channel_num in self.channel_accumulator.keys():
-            cells_in_channel = self.cell_centroid_accumulator[channel_num]
-            minpos = min(cells_in_channel.keys())
-            signal = np.zeros(max(cells_in_channel.keys()) + 1 - minpos)
-            for pos, times in cells_in_channel.items():
-                signal[pos - minpos] = times
-
-            signal_len = len(signal)
-
-            # noinspection PyTypeChecker
-            helper_parabola = np.linspace(-signal_len / 2, +signal_len / 2, signal_len) ** 2 / signal_len ** 2
-
-            signal = hamming_smooth(signal, 15)
-            signal *= helper_parabola
-
-            try:
-                extrema = find_extrema_and_prominence(signal)
-                maxy = extrema.signal[extrema.maxima]
-
-                centroid = np.sum(extrema.maxima * maxy) / np.sum(maxy)
-
-                # mean = np.mean(maxy)
-                result = 1 if centroid >= signal.size / 2 else -1
-            except IndexError:
-                result = 0
+            result = 1
 
             for channel in self.channel_accumulator[channel_num]:
                 channel.putative_orientation = result
+
+        # for channel_num in self.channel_accumulator.keys():
+        #     cells_in_channel = self.cell_centroid_accumulator[channel_num]
+        #     minpos = min(cells_in_channel.keys())
+        #     signal = np.zeros(max(cells_in_channel.keys()) + 1 - minpos)
+        #     for pos, times in cells_in_channel.items():
+        #         signal[pos - minpos] = times
+        #
+        #     signal_len = len(signal)
+        #
+        #     # noinspection PyTypeChecker
+        #     helper_parabola = np.linspace(-signal_len / 2, +signal_len / 2, signal_len) ** 2 / signal_len ** 2
+        #
+        #     signal = hamming_smooth(signal, 15)
+        #     signal *= helper_parabola
+        #
+        #     try:
+        #         extrema = find_extrema_and_prominence(signal)
+        #         maxy = extrema.signal[extrema.maxima]
+        #
+        #         centroid = np.sum(extrema.maxima * maxy) / np.sum(maxy)
+        #
+        #         # mean = np.mean(maxy)
+        #         result = 1 if centroid >= signal.size / 2 else -1
+        #     except IndexError:
+        #         result = 0
+        #
+        #     for channel in self.channel_accumulator[channel_num]:
+        #         channel.putative_orientation = result
+        #         channel.putative_orientation =0
 
     def get_tracking_work_size(self):
         """
@@ -205,6 +212,8 @@ class TrackedPosition(object):
 
         :param progress_indicator:
         """
+
+        print("<3<3<3<3<3 tracking / perform_tracking")
         for c in self.tracker_mapping.keys():
             tracker = self.tracker_mapping[c]
             channel_list = self.channel_accumulator[c]
@@ -288,17 +297,20 @@ def analyse_cell_fates(tracker, previous_cells, current_cells):
     outcome_it_is_lost = None
 
     opt = CellCrossingCheckingGlobalDuoOptimizerQueue()
+    # print("tracking / analyse_cell_fates ***********************************")
 
     for previous_number, previous_cell in enumerate(previous_cells):
         if not tracker.is_tracked(previous_cell):  # this probably only occurs on the first attempt
             tracker.new_observed_origin(previous_cell)
+
         for current_number, current_cell in enumerate(current_cells):
+
             tracked_previous_cell = tracker.get_cell_by_observation(previous_cell)
 
             trajectories = tracked_previous_cell.trajectories
             elongation_rates = tracked_previous_cell.elongation_rates
 
-            last_traj = np.mean(trajectories[-min(len(trajectories), 5):])
+            last_traj = np.mean(trajectories[-min(len(trajectories), 10):])
             last_elo = np.mean(elongation_rates[-min(len(elongation_rates), 5):])
 
             time_delta = current_cell.channel.image.timepoint - previous_cell.channel.image.timepoint
@@ -306,14 +318,21 @@ def analyse_cell_fates(tracker, previous_cells, current_cells):
             putative_shift = last_traj * time_delta
             putative_elongation = last_elo * time_delta
 
+            ###############
+            # print("*** \t ", previous_number, current_number, )
+            ###############
+
             # putative_shift, putative_elongation = 0.0, 0.0
 
             shift_upper = putative_shift + 0.5 * putative_elongation
             shift_lower = putative_shift - 0.5 * putative_elongation
 
-            shrinkage_penalty = 5.0
+            # print("number ", current_number)
+            # print(shift_upper,shift_lower)
 
-            large_value = 1000000.0
+            shrinkage_penalty = 5
+
+            large_value = 10000000.0
             cost_new_cell = 1.0 * large_value
             cost_lost_cell = 1.0 * large_value
 
@@ -324,9 +343,7 @@ def analyse_cell_fates(tracker, previous_cells, current_cells):
                 :param other_cell:
                 :return:
                 """
-                cost = \
-                    0.5 * abs(one_cell.top + shift_upper - other_cell.top) + \
-                    0.5 * abs(one_cell.bottom + shift_lower - other_cell.bottom)
+                cost = 0.5 * abs(one_cell.top + shift_upper - other_cell.top) + 0.5 * abs(one_cell.bottom + shift_lower - other_cell.bottom)
 
                 shrinkage = other_cell.length - (one_cell.length + putative_elongation)
 

@@ -4,14 +4,12 @@ documentation
 """
 from __future__ import division, unicode_literals, print_function
 
-import warnings
-
 import numpy as np
 
 from ..debugging import DebugPlot
 from ..generic.signal import find_phase, find_extrema_and_prominence, spectrum_fourier, spectrum_bins_by_length,\
     hires_power_spectrum, vertical_mean, horizontal_mean, normalize, threshold_outliers, find_insides, one_every_n,\
-    hamming_smooth, each_image_slice
+    hamming_smooth, each_image_slice, normalize2
 from .cell_detection import Cells
 from ..generic.etc import NotReallyATree
 from ..generic.tunable import tunable
@@ -28,7 +26,7 @@ class Channel(object):
     """
     cells_type = Cells
 
-    __slots__ = ['image', 'left', 'right', 'real_top', 'real_bottom', 'putative_orientation', 'cells', 'channel_image']
+    __slots__ = ['image', 'left', 'right', 'real_top', 'real_bottom', 'putative_orientation', 'cells', 'channel_image', "min_and_max"]
 
     def __init__(self, image, left, right, top, bottom):
         self.image = image
@@ -38,6 +36,7 @@ class Channel(object):
         self.real_bottom = float(bottom)
         self.putative_orientation = 0
         self.cells = None
+        self.min_and_max = [0,0]
 
         if self.image.image is not None:
             self.channel_image = self.crop_out_of_image(self.image.image)
@@ -86,12 +85,15 @@ class Channel(object):
         return [[self.left, self.bottom], [self.right, self.bottom], [self.right, self.top], [self.left, self.top],
                 [self.left, self.bottom]]
 
+
+
     def detect_cells(self):
         """
         Performs Cell detection (by instantiating a Cells object).
 
         """
         self.cells = self.__class__.cells_type(self)
+        self.min_and_max = self.cells.min_max_from_profile
 
     def clean(self):
         """
@@ -167,6 +169,7 @@ class Channels(object):
             self.nearest_tree = treeprovider(self.centroids)
         return self.nearest_tree.query(pos)
 
+
     def align_with_and_return_indices(self, other_channels):
         """
 
@@ -218,7 +221,7 @@ def horizontal_channel_detection(image):
     # oversample the fft n-times
     n = tunable('channels.horizontal.fft_oversampling', 8,
                 description="For channel detection, FFT oversampling factor.")
-
+    hamm_smooth = 8
     def calc_bins_freqs_main(the_profile):
         """
 
@@ -226,7 +229,7 @@ def horizontal_channel_detection(image):
         :return:
         """
         frequencies, fourier_value = hires_power_spectrum(the_profile, oversampling=n)
-        fourier_value = hamming_smooth(fourier_value, 3)
+        fourier_value = hamming_smooth(fourier_value, 8)
         return frequencies, fourier_value, frequencies[np.argmax(fourier_value)]
 
     # get the power spectra of the two signals
@@ -234,38 +237,25 @@ def horizontal_channel_detection(image):
     frequencies_lower, fourier_value_lower, mainfrequency_lower = calc_bins_freqs_main(lower_profile)
 
     upper_profile = hamming_smooth(upper_profile,
-                                   tunable('channels.horizontal.profile_smoothing_width.upper', 5,
+                                   tunable('channels.horizontal.profile_smoothing_width.upper', hamm_smooth ,
                                            description="For channel detection, upper profile, smoothing window width."))
     lower_profile = hamming_smooth(lower_profile,
-                                   tunable('channels.horizontal.profile_smoothing_width.lower', 5,
+                                   tunable('channels.horizontal.profile_smoothing_width.lower', hamm_smooth ,
                                            description="For channel detection, lower profile, smoothing window width."))
 
-    with DebugPlot('channel_detection', 'details', 'powerspectra', 'upper') as p:
-        p.title("Powerspectrum (upper)")
-        p.semilogx(frequencies_upper, fourier_value_upper)
-        p.title("main_frequency=%f" % mainfrequency_upper)
-
-    with DebugPlot('channel_detection', 'details', 'powerspectra', 'lower') as p:
-        p.title("Powerspectrum (lower)")
-        p.semilogx(frequencies_lower, fourier_value_lower)
-        p.title("main_frequency=%f" % mainfrequency_lower)
+    # with DebugPlot('channel_detection', 'details', 'powerspectra', 'upper') as p:
+    #     p.title("Powerspectrum (upper)")
+    #     p.semilogx(frequencies_upper, fourier_value_upper)
+    #     p.title("main_frequency=%f" % mainfrequency_upper)
+    #
+    # with DebugPlot('channel_detection', 'details', 'powerspectra', 'lower') as p:
+    #     p.title("Powerspectrum (lower)")
+    #     p.semilogx(frequencies_lower, fourier_value_lower)
+    #     p.title("main_frequency=%f" % mainfrequency_lower)
 
     main_frequency = (mainfrequency_upper + mainfrequency_lower) / 2
 
     if main_frequency == 0.0:
-        return nothing_found
-
-    maximum_channel_count = profile.size / main_frequency
-
-    allowed_maximum_channel_count = tunable(
-        'channels.horizontal.channel_count.max', 50,
-        description="For channel detection, maximum allowed channels to be detected.")
-
-    allowed_minimum_channel_count = tunable(
-        'channels.horizontal.channel_count.min', 3,
-        description="For channel detection, minimum allowed channels to be detected.")
-
-    if maximum_channel_count > allowed_maximum_channel_count or maximum_channel_count < allowed_minimum_channel_count:
         return nothing_found
 
     profile_diff_len = profile_diff.size
@@ -351,8 +341,138 @@ def horizontal_channel_detection(image):
 
     return positions, left, right, width, times, main_frequency,
 
-# TODO fix the proper one, or merge them, or document this here, or use just the new one
 
+def horizontal_channel_detection_simple(image):
+    """
+
+    @param image:
+    @return:
+    """
+
+    # nothing found is a helper variable, which will be returned in case.
+    nothing_found = ([], 0, 0, 0, 0, -1, )
+
+    profile = horizontal_mean(image)
+    profile_diff = np.diff(profile)
+
+    upper_profile = +(profile_diff * (profile_diff > 0))
+    lower_profile = -(profile_diff * (profile_diff < 0))
+
+    upper_profile[
+        upper_profile < upper_profile.max() *
+        tunable(
+            'channels.horizontal.noise_suppression_range.upper', 0.5,
+            description="For channel detection, upper profile, noise reduction, reduction range."
+        )
+    ] *= tunable('channels.horizontal.noise_suppression_factor.upper', 0.1,
+                 description="For channel detection, upper profile, noise reduction, reduction factor.")
+
+    lower_profile[
+        lower_profile < lower_profile.max() *
+        tunable('channels.horizontal.noise_suppression_range.lower', 0.5,
+                description="For channel detection, lower profile, noise reduction, reduction range.")
+    ] *= tunable('channels.horizontal.noise_suppression_factor.lower', 0.1,
+                 description="For channel detection, lower profile, noise reduction, reduction factor.")
+
+    with DebugPlot('channel_detection', 'details', 'differences') as p:
+        p.title("Channel detection/Differences")
+        p.plot(upper_profile)
+        p.plot(lower_profile)
+
+    # oversample the fft n-times
+    n = tunable('channels.horizontal.fft_oversampling', 8,
+                description="For channel detection, FFT oversampling factor.")
+
+
+    def calc_bins_freqs_main(the_profile):
+        """
+
+        :param the_profile:
+        :return:
+        """
+        frequencies, fourier_value = hires_power_spectrum(the_profile, oversampling=n)
+        fourier_value = hamming_smooth(fourier_value, 10)
+        return frequencies, fourier_value, frequencies[np.argmax(fourier_value)]
+
+    # get the power spectra of the two signals
+    frequencies_upper, fourier_value_upper, mainfrequency_upper = calc_bins_freqs_main(upper_profile)
+    frequencies_lower, fourier_value_lower, mainfrequency_lower = calc_bins_freqs_main(lower_profile)
+
+    hamm_smooth = 10
+    upper_profile = hamming_smooth(upper_profile,
+                                   tunable('channels.horizontal.profile_smoothing_width.upper', hamm_smooth,
+                                           description="For channel detection, upper profile, smoothing window width."))
+    lower_profile = hamming_smooth(lower_profile,
+                                   tunable('channels.horizontal.profile_smoothing_width.lower', hamm_smooth,
+                                           description="For channel detection, lower profile, smoothing window width."))
+
+    # with DebugPlot('channel_detection', 'details', 'powerspectra', 'upper') as p:
+    #     p.title("Powerspectrum (upper)")
+    #     p.semilogx(frequencies_upper, fourier_value_upper)
+    #     p.title("main_frequency=%f" % mainfrequency_upper)
+    #
+    # with DebugPlot('channel_detection', 'details', 'powerspectra', 'lower') as p:
+    #     p.title("Powerspectrum (lower)")
+    #     p.semilogx(frequencies_lower, fourier_value_lower)
+    #     p.title("main_frequency=%f" % mainfrequency_lower)
+
+    main_frequency = (mainfrequency_upper + mainfrequency_lower) / 2
+
+    if main_frequency == 0.0:
+        print("nothing_found!")
+        return nothing_found
+
+    profile_diff_len = profile_diff.size
+    absolute_differentiated_profile = np.absolute(profile_diff)
+
+    width, = find_phase(upper_profile, lower_profile)
+
+    if width > main_frequency:
+        width = int(width % main_frequency)
+    elif width < 0:
+        width = int(width + main_frequency * np.ceil(abs(width / main_frequency)))
+
+
+
+    main_frequency += (width / (profile_diff_len / main_frequency))
+
+
+    temporary_signal = np.zeros_like(absolute_differentiated_profile)
+
+    absolute_differentiated_profile_norm = normalize2(absolute_differentiated_profile)
+
+    temporary_extrema = find_extrema_and_prominence(absolute_differentiated_profile_norm, order=(width // 2))
+    mx2 = [i for i in temporary_extrema.maxima if absolute_differentiated_profile_norm [i] > 0.2]
+
+    temporary_signal[mx2] = 1
+
+    new_signal = temporary_signal
+
+    with DebugPlot('channel_detection') as p:
+        p.title("new_signal/maxima")
+        p.plot(new_signal)
+
+
+    positions, = np.where(new_signal)
+    #
+    if len(positions) % 2 == 1:
+        print("some edge is missing!")
+        return nothing_found
+
+    positions = positions.reshape((len(positions) // 2, 2))
+    times = int(len(new_signal) / main_frequency)
+
+    # we worked with a simple difference, which made our signal shorter by one
+    # add 1 to the appropriate variables to match positions with the original image
+
+    positions += 1
+    left, right = 1, len(new_signal) + 1
+    # print("positions", positions)
+    # print("others", left, right, width, times, main_frequency)
+
+    return positions, left, right, width, times, main_frequency,
+
+# TODO fix the proper one, or merge them, or document this here, or use just the new one
 
 def alternate_vertical_channel_region_detection(image):
 
@@ -385,7 +505,8 @@ def alternate_vertical_channel_region_detection(image):
 
         return ft.max(), f[np.argmax(ft)]
 
-    split_factor = tunable('channels.vertical.alternate.split_factor', 60,
+    s_f = image.shape[0]
+    split_factor = tunable('channels.vertical.alternate.split_factor', s_f ,
                            description="For channel detection (alternate, vertical), split factor.")
 
     collector = np.zeros(image.shape[0])
@@ -399,23 +520,15 @@ def alternate_vertical_channel_region_detection(image):
     # print(collector)
     int_collector = collector.astype(np.int32)
 
-    if (int_collector == 0).all():
-        warnings.warn(
-            "Apparently no channel region was detectable. If the images are flipped, try filename?rotate=<90|270>",
-            RuntimeWarning
-        )
-        return 0, len(int_collector)
-
     bins = np.bincount(int_collector)
     winner = np.argmax(bins[1:]) + 1
 
-    delta = tunable('channels.vertical.alternate.delta', 5,
+    delta = tunable('channels.vertical.alternate.delta', 1,
                     description="For channel detection (alternate, vertical), acceptable delta.")
-
-    collector = (np.absolute(int_collector - winner) < delta) | (np.absolute(int_collector - 2*winner) < delta)
+    # collector = (np.absolute(int_collector - winner) < delta) | (np.absolute(int_collector - 2 * winner) < delta)
+    collector = (np.absolute(int_collector - winner) < delta)
 
     return sorted(find_insides(collector), key=lambda pair: pair[1] - pair[0], reverse=True)[0]
-
 
 FIRST_CALL, FROM_TOP, FROM_BOTTOM = 0, -1, 1
 
@@ -515,6 +628,7 @@ def vertical_channel_region_detection(image):
 
     recursive_check(0, height)
 
+
     return sorted(find_insides(collector), key=lambda pair: pair[1] - pair[0], reverse=True)[0]
 
 
@@ -527,26 +641,31 @@ def find_channels(image):
 
     method_to_use = tunable(
         'channels.vertical.method',
-        'alternate',
-        description="For channel detection, vertical method to use (either alternate or recursive).")
+        'None', #alternate
+        description="For channel detection, vertical method to use (either alternate, recursive ). None if is pre-cutted, then the boundaries are the limits of the picture")
 
     if method_to_use == 'alternate':
         upper, lower = alternate_vertical_channel_region_detection(image)
     elif method_to_use == 'recursive':
         upper, lower = vertical_channel_region_detection(image)
-    else:
-        raise RuntimeError("Tunable set to unsupported vertical channel detection method.")
+    elif method_to_use == 'None':
+        upper, lower = 0, image.shape[0]#upper, lower = 2, image.shape[0]
+        # print("upper, lower", upper, lower)
+        #raise RuntimeError("Tunable set to unsupported vertical channel detection method.")
 
+    elif method_to_use == 'alternate_plus_100':
+        upper, lower = alternate_vertical_channel_region_detection(image)
+        upper = upper
+        lower = upper + 100
     profile = horizontal_mean(image)
 
-    with DebugPlot('channel_detection', 'details', 'overview', 'horizontal') as p:
-        p.title("Basic horizontal overview")
-        p.plot(profile)
 
     with DebugPlot('channel_detection', 'details', 'overview', 'vertical') as p:
         p.title("Basic vertical overview")
         p.plot(vertical_mean(image))
-
-    positions, left, right, width, times, mainfreq = horizontal_channel_detection(image[upper:lower, :])
+    #positions, left, right, width, times, mainfreq = horizontal_channel_detection(image[upper:lower, :])
+    positions, left, right, width, times, mainfreq = horizontal_channel_detection_simple(image[upper:lower, :])
+    # print(np.mean(image[0]))
+    # print(positions)
 
     return positions, (upper, lower)

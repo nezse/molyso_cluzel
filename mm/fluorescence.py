@@ -20,15 +20,17 @@ class FluorescentCell(Cell):
     :param args:
     :param kwargs:
     """
-    __slots__ = ['fluorescences_mean', 'fluorescences_std']
 
-    def __init__(self, *args, **kwargs):
-        super(FluorescentCell, self).__init__(*args, **kwargs)
+    __slots__ = ['fluorescences_mean', 'fluorescences_std', 'fluorescences_total', 'fluorescences_region_size']
+
+    def UpdateFluorescence(self):
 
         fluorescences_count = len(self.channel.image.image_fluorescences)
 
         self.fluorescences_mean = [float('nan')] * fluorescences_count
         self.fluorescences_std = [float('nan')] * fluorescences_count
+        self.fluorescences_total = [float('nan')] * fluorescences_count;
+        self.fluorescences_region_size = [0] * fluorescences_count;
 
         try:
             # reconstitution from flattened state will fail
@@ -41,11 +43,32 @@ class FluorescentCell(Cell):
 
                 fluorescence_cell_image = self.get_fluorescence_cell_image(f)
 
+                self.fluorescences_total[f] = float(fluorescence_cell_image.sum())
+                self.fluorescences_region_size[f] = fluorescence_cell_image.size;
                 self.fluorescences_mean[f] = float(fluorescence_cell_image.mean())
                 self.fluorescences_std[f] = float(fluorescence_cell_image.std())
 
         except (AttributeError, TypeError):
             pass
+
+    def __init__(self, *args, **kwargs):
+        super(FluorescentCell, self).__init__(*args, **kwargs)
+        self.UpdateFluorescence();
+
+    @property
+    def fluorescences_in_total(self):
+        return [
+            self.fluorescences_total[f] - self.fluorescences_region_size[f] *
+            self.channel.image.background_fluorescences[f]
+            for f in range(len(self.channel.image.image_fluorescences))
+        ];
+
+    @property
+    def fluorescences_region_size_num(self):
+        return [
+            self.fluorescences_region_size[f]
+            for f in range(len(self.channel.image.image_fluorescences))
+        ];
 
     @property
     def fluorescences(self):
@@ -129,6 +152,8 @@ class FluorescentImage(Image):
     def __init__(self):
         super(FluorescentImage, self).__init__()
 
+        # print("1-fluorescence")
+
         self.keep_fluorescences_image = False
         self.pack_fluorescences_image = False
 
@@ -196,9 +221,9 @@ class FluorescentImage(Image):
                 previous_channel = next(channel_iterator)
                 for n, next_channel in enumerate(channel_iterator):
                     background_fragment = fluorescence_image[
-                        int(next_channel.real_top):int(next_channel.real_bottom),
-                        int(previous_channel.right):int(next_channel.left)
-                    ]
+                                          int(next_channel.real_top):int(next_channel.real_bottom),
+                                          int(previous_channel.right):int(next_channel.left)
+                                          ]
                     background_fluorescence_means[n, 0] = background_fragment.mean()
                     background_fluorescence_means[n, 1] = background_fragment.size
                     previous_channel = next_channel

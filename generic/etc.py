@@ -84,7 +84,6 @@ def iter_time(iterable):
     stop_time = time.time()
     logger.info("whole step took %.3fs" % (stop_time - start_time,))
 
-
 _fancy_progress_bar = fancy_progress_bar
 
 
@@ -151,9 +150,8 @@ class QuickTableDumper(object):
         """
         if len(self.headers) == 0:
             self.headers = list(sorted(row.keys()))
-            self.write_list(self.headers)
-
-        self.write_list(row[k] for k in self.headers)
+            self.write_list(self.headers) #uncomment if you want to display  data for cells at console
+        self.write_list(row[k] for k in self.headers) #uncomment if you want to display  data for cells at console
 
     def stringify(self, obj):
         """
@@ -470,7 +468,6 @@ class FileCache(BaseCache):
         """
         with open(self.build_cache_filename(key), 'wb+') as fp:
             fp.write(value)
-
 
 Cache = FileCache
 

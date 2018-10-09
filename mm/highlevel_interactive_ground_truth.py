@@ -30,9 +30,7 @@ def interactive_ground_truth_main(args, tracked_results):
 
     acceptable_pos_chans = \
         {p: list(range(len(tracked_results[list(tracked_results.keys())[p]].channel_accumulator.keys())))
-         for p
-         in range(len(tracked_results.keys()))
-         if len(tracked_results[list(tracked_results.keys())[p]].channel_accumulator.keys()) > 0}
+            for p in range(len(tracked_results.keys())) if len(tracked_results[list(tracked_results.keys())[p]].channel_accumulator.keys()) > 0}
 
     def plots_info():
         """
@@ -155,11 +153,6 @@ def interactive_ground_truth_main(args, tracked_results):
 
         plt.imshow(large_image)
 
-        plt.title("Ground Truth — Position %d, channel %d" % (pos, chan_num,))
-
-        plt.xlabel("x [Pixel]")
-        plt.ylabel("y [Pixel]")
-
         fig.tight_layout()
 
         o_scatter = ax.scatter(0, 0)
@@ -167,7 +160,7 @@ def interactive_ground_truth_main(args, tracked_results):
 
         def refresh():
             """
-            Refreshes the overlay.
+            Refreshs the overlay.
 
             """
             o_lines.set_data(env['points'][:env['used'], 0], env['points'][:env['used'], 1])
@@ -293,12 +286,10 @@ def interactive_ground_truth_main(args, tracked_results):
                     next_chan = acceptable_pos_chans[next_pos + p][0]
 
                 if c == 1:
-                    while (next_chan + c) not in acceptable_pos_chans[next_pos + p] and \
-                            (next_chan + c) < max(acceptable_pos_chans[next_pos + p]):
+                    while (next_chan + c) not in acceptable_pos_chans[next_pos + p] and (next_chan + c) < max(acceptable_pos_chans[next_pos + p]):
                         c += 1
                 elif c == -1:
-                    while (next_chan + c) not in acceptable_pos_chans[next_pos + p] and \
-                            (next_chan + c) > min(acceptable_pos_chans[next_pos + p]):
+                    while (next_chan + c) not in acceptable_pos_chans[next_pos + p] and (next_chan + c) > min(acceptable_pos_chans[next_pos + p]):
                         c -= 1
 
                 if (next_chan + c) not in acceptable_pos_chans[next_pos + p]:

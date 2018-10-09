@@ -16,6 +16,16 @@ from collections import namedtuple
 from .smoothing import hamming_smooth
 from .fft import *
 
+from ..debugging import DebugPlot
+from ..generic.tunable import tunable
+
+
+
+from scipy.ndimage.morphology import white_tophat
+
+
+def white_top_hat(array, tuple):
+    return white_tophat(array, tuple)
 
 def find_phase(signal_1=None, signal_2=None,
                fft_1=None, fft_2=None,
@@ -86,28 +96,6 @@ class ExtremeAndProminence(namedtuple('ExtremeAndProminence', ['maxima', 'minima
     """
 
 
-def _dummy_max_spline(arg):
-    """
-
-    :param arg:
-    :return:
-    """
-    arg = np.zeros_like(arg)
-    arg[:] = float('Inf')
-    return arg
-
-
-def _dummy_min_spline(arg):
-    """
-
-    :param arg:
-    :return:
-    """
-    arg = np.zeros_like(arg)
-    arg[:] = float('-Inf')
-    return arg
-
-
 def find_extrema_and_prominence(signal, order=5):
     """
     Generates various extra information / signals.
@@ -133,9 +121,14 @@ def find_extrema_and_prominence(signal, order=5):
             25.11428571,  29.37321429,  32.        ,  32.40535714,  30.        ]))
     """
     # we are FORCING some kind of result here, although it might be meaningless
+    # signal = normalize2(signal)
+
+
+    ########################## maxima
 
     maxima = np.array([np.argmax(signal)])
     iorder = order
+
     while iorder > 0:
         try:
             maxima = relative_maxima(signal, order=iorder)
@@ -147,30 +140,8 @@ def find_extrema_and_prominence(signal, order=5):
     if len(maxima) == 0:
         maxima = np.array([np.argmax(signal)])
 
-    if len(maxima) == 1 and (maxima[0] == 0 or maxima[0] == len(signal) - 1):
-        maxima = []
-
-    minima = np.array([np.argmin(signal)])
-    iorder = order
-    while iorder > 0:
-        try:
-            minima = relative_minima(signal, order=iorder)
-        except ValueError:
-            iorder -= 1
-            continue
-        break
-
-    if len(minima) == 0:
-        minima = np.array([np.argmin(signal)])
-
-    if len(minima) == 1 and (minima[0] == 0 or minima[0] == len(signal) - 1):
-        minima = []
-
     maximaintpx = np.zeros(len(maxima) + 2)
     maximaintpy = np.copy(maximaintpx)
-
-    minimaintpx = np.zeros(len(minima) + 2)
-    minimaintpy = np.copy(minimaintpx)
 
     maximaintpx[0] = 0
     maximaintpx[1:-1] = maxima[:]
@@ -182,44 +153,107 @@ def find_extrema_and_prominence(signal, order=5):
         maximaintpy[1:-1] = signal_maxima[:]
         maximaintpy[-1] = signal_maxima[-1]
 
+    # signal_maxima = signal[maxima]
+    # maximaintpy[0] = signal[maxima]
+    # maximaintpy[1:-1] = signal[maxima][:]
+    # maximaintpy[-1] = signal[maxima][-1]
+
+    ########################## minima
+    minima = np.array([np.argmin(signal)])
+    iorder = order-2
+    while iorder > 0:
+        try:
+            minima = relative_minima(signal, order=iorder)
+        except ValueError:
+            iorder -= 1
+            continue
+        break
+    if len(minima) == 0:
+        minima = np.array([np.argmin(signal)])
+
+
+
+    minimaintpx = np.zeros(len(minima) + 2)
+    minimaintpy = np.copy(minimaintpx)
+
+
+
     minimaintpx[0] = 0
     minimaintpx[1:-1] = minima[:]
     minimaintpx[-1] = len(signal) - 1
 
-    signal_minima = signal[minima]
+    minimaintpy[0] = signal[minima][0]
+    minimaintpy[1:-1] = signal[minima][:]
+    minimaintpy[-1] = signal[minima][-1]
 
-    if len(signal_minima) > 0:
-        minimaintpy[0] = signal_minima[0]
-        minimaintpy[1:-1] = signal_minima[:]
-        minimaintpy[-1] = signal_minima[-1]
 
     k = 3
     if len(maximaintpy) <= 3:
         k = len(maximaintpy) - 1
     if k < 1:
-        max_spline = _dummy_max_spline
+        def max_spline(arg):
+            """
+
+            :param arg:
+            :return:
+            """
+            arg = np.zeros_like(arg)
+            arg[:] = float('Inf')
+            return arg
     else:
         with warnings.catch_warnings():
+            # print(k, minimaintpx)
             warnings.simplefilter('ignore')
-            max_spline = scipy.interpolate.UnivariateSpline(maximaintpx, maximaintpy, bbox=[0, len(signal)], k=k)
+
+            max_spline = scipy.interpolate.UnivariateSpline(maximaintpx, maximaintpy, bbox=[0, len(signal)], k=k-1)
 
     k = 3
     if len(minimaintpy) <= 3:
         k = len(minimaintpy) - 1
     if k < 1:
-        min_spline = _dummy_min_spline
+        def min_spline(arg):
+            """
+
+            :param arg:
+            :return:
+            """
+            arg = np.zeros_like(arg)
+            arg[:] = float('-Inf')
+            return arg
     else:
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
+
+
             min_spline = scipy.interpolate.UnivariateSpline(minimaintpx, minimaintpy, bbox=[0, len(signal)], k=k)
 
     xpts = np.linspace(0, len(signal) - 1, len(signal))
-
     maxsy = max_spline(xpts)
     minsy = min_spline(xpts)
+    prominence = maxsy - minsy
+
+    with DebugPlot('graph') as p:
+        # p.title("find_extrema_and_prominence")
+        # p.plot(signal, '-o',label='signal')
+        # p.plot(maxsy,'-', label='max spline')
+        # p.plot(minsy,'-', label='min spline')
+        # p.plot(minimaintpx, minimaintpy, label='minsplne signal')
+        # p.plot(maximaintpx, maximaintpy, label='maxisplne signal')
+        # p.plot(prominence, #
+        # p.legend()
+
+        p.title("find extrema and prominence")
+        p.plot(signal, '-o', label='profile')
+        p.plot(maxsy, '-', label='max spline')
+        p.plot(minsy, '-', label='min spline')
+        # p.plot(minimaintpx, minimaintpy, label='minsplne signal')
+        # p.plot(maximaintpx, maximaintpy, label='maxisplne signal')
+        p.plot(prominence, '-', label='prominence')
+
+        p.legend(loc='center left', bbox_to_anchor=(1, 0.5))
 
     return ExtremeAndProminence(maxima, minima, signal, order, max_spline, min_spline, xpts, maxsy, minsy,
-                                maxsy - minsy)
+                                prominence)
 
 
 def simple_baseline_correction(signal, window_width=None):
@@ -278,7 +312,7 @@ def relative_maxima(signal, order=1):
     """
 
     :param signal:
-    :param order:
+    :param order: How many points on each side to use for the comparison to consider comparator(n, n+x) to be True.
     :return:
 
     >>> relative_maxima(np.array([1, 2, 3, 2, 1, 0, 1, 2, 15, 2, -15, 2, 1]), 2)
@@ -301,6 +335,12 @@ def relative_minima(signal, order=1):
     value, = scipy.signal.argrelmin(signal, order=order)
     return value
 
+def subtraction(a, b):
+    return [ai - bi for ai, bi in zip(a,b)]
+
+def min_and_max(data):
+    data_ = data.astype(float)
+    return [data_.min(), data_.max()]
 
 def normalize(data):
     """
@@ -320,8 +360,52 @@ def normalize(data):
     result /= result.max()
     return result
 
+def normalize2(data):
+    """
+    normalizes the values in arr to 0 - 1
 
+    :param data: input array
+    :return: normalized array
+
+    """
+    result = data.astype(float)
+    result -= result.min()
+    result /= (result.max()-result.min())
+    return result
+
+def normalize_specific_range(data , new_max, new_min):
+    """
+    normalizes the values in arr to new_min and new_max
+
+    :param data: input array
+    :return: normalized array
+
+    """
+
+    result = data.astype(float)
+
+
+    if result.max() != result.min():
+        result -= result.min()
+        result /= (result.max()-result.min())
+
+        result *= (new_max - new_min)
+        result +=  new_min
+
+
+    else:
+        print("??")
+        result = [new_min]*len(result)
+
+    return result
+
+def add_element_to_list(lista, element):
+    return np.asarray([(a+element) for a in lista])
+
+def multiply_list_by_element(lista, element):
+    return [(a*element) for a in lista]
 # noinspection PyUnresolvedReferences
+
 def fit_to_type(image, new_dtype):
     """
 
@@ -487,3 +571,14 @@ def each_image_slice(image, steps, direction='vertical'):
             yield n, step, image[step * n:step * (n + 1), :]
     else:
         raise ValueError("Unknown direction passed.")
+
+def savitzky_golay_filter(x, w, p):
+    from scipy.signal import  savgol_filter
+    return savgol_filter(x, w, p)
+
+
+
+def export_list(name, lista):
+    with open(name + ".txt", "w") as text_file:
+        for i in lista:
+            text_file.write(str(i) + "\n")

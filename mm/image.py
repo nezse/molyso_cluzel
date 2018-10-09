@@ -33,7 +33,7 @@ class BaseImage(object):
         self.timepoint = 0.0
         self.timepoint_num = 0
 
-        self.calibration_px_to_mu = 1.0  # uncalibrated
+        self.calibration_px_to_mu = 0.15  # uncalibrated 0.15
 
         # metadata
 
@@ -43,7 +43,7 @@ class BaseImage(object):
                          'time': 0.0,
                          'timepoint': 0,
                          'multipoint': 0,
-                         'calibration_px_to_mu': 1.0,
+                         'calibration_px_to_mu': 0.15,
                          'tag': '',
                          'tag_number': 0}
 
@@ -98,8 +98,7 @@ class BaseImage(object):
 
 class AutoRotationProvider(object):
     """
-    This mixin class adds automatic rotation
-    (by :py:func:`molyso.generic.rotation.find_rotation`) functionality to the Image class.
+    This mixin class adds automatic rotation (by :py:func:`molyso.generic.rotation.find_rotation`) functionality to the Image class.
     """
 
     def __init__(self):
@@ -115,35 +114,19 @@ class AutoRotationProvider(object):
         """
 
         if self.angle != self.angle:
-            self.angle = find_rotation(
-                self.image,
-                steps=tunable(
-                    'orientation-detection.strips', 10,
-                    description="Number of strips for orientation correction."
-                )
-            )
+            self.angle = find_rotation(self.image, steps=
+            tunable('orientation-detection.strips', 10, description="Number of strips for orientation correction."))
 
         # noinspection PyAttributeOutsideInit
-        self.image, self.angle, self.crop_height, self.crop_width = \
-            apply_rotate_and_cleanup(self.image, self.angle)
+        self.image, self.angle, self.crop_height, self.crop_width = apply_rotate_and_cleanup(self.image, self.angle)
 
-        if self.image.size == 0:
-            warnings.warn(
-                "Autorotation failed. This likely means that the image is unsuitable for use with molyso.",
-                RuntimeWarning
-            )
-
-            # noinspection PyAttributeOutsideInit
-            self.image = self.original_image.copy()
-            self.angle = 0.0
-            self.crop_height = self.crop_width = 0
-
+    def rotate(self, angle):
+        self.image, self.angle, self.crop_height, self.crop_width = apply_rotate_and_cleanup(self.image, angle)
 
 # noinspection PyUnresolvedReferences
 class AutoRegistrationProvider(object):
     """
-    This mixin class adds automatic registration
-    (by :py:func:`molyso.generic.registration.translation_2x1d`) functionality to the Image class.
+    This mixin class adds automatic registration (by :py:func:`molyso.generic.registration.translation_2x1d`) functionality to the Image class.
     """
 
     def __init__(self):
@@ -181,7 +164,7 @@ class AutoRegistrationProvider(object):
         self.shift = [yn, xn]
 
 
-cell_color = tunable('colors.cell', '#005b82', description="For debug output, cell color.")
+cell_color = tunable('colors.cell', '#2de5da', description="For debug output, cell color.")
 channel_color = tunable('colors.channel', '#e7af12', description="For debug output, channel color.")
 
 
@@ -222,6 +205,9 @@ class Image(AutoRegistrationProvider, AutoRotationProvider, BaseImage):
 
         self.channel_images = None
 
+        self.channels_min_list = []
+        self.channels_max_list = []
+
     def setup_image(self, image):
         """
 
@@ -253,18 +239,18 @@ class Image(AutoRegistrationProvider, AutoRotationProvider, BaseImage):
         self.channels = self.__class__.channels_type(self)
 
         with DebugPlot('channel_detection', 'result', 'on_original') as p:
-            p.title("Detected channels (on original image)")
+            p.title("Detected channels (on original image) (mm/image/find_channels)")
             p.imshow(self.original_image)
             for chan in self.channels:
                 coords = [self.cp(*pp) for pp in chan.get_coordinates()]
-                p.poly_drawing_helper(coords, lw=1, edgecolor=channel_color, fill=False, closed=True)
+                p.poly_drawing_helper(coords, lw=1.5, edgecolor=channel_color, fill=False, closed=True)
 
         with DebugPlot('channel_detection', 'result', 'rotated') as p:
             p.title("Detected channels")
             p.imshow(self.image)
             for chan in self.channels:
                 coords = chan.get_coordinates()
-                p.poly_drawing_helper(coords, lw=1, edgecolor=channel_color, fill=False, closed=True)
+                p.poly_drawing_helper(coords, lw=1.5, edgecolor=channel_color, fill=False, closed=True)
 
     def find_cells_in_channels(self):
         """
@@ -272,10 +258,20 @@ class Image(AutoRegistrationProvider, AutoRotationProvider, BaseImage):
         will visualize the outcome, if debugging is enabled
         :return:
         """
+        channels_min_list = []
+        channels_max_list = []
+
 
         # noinspection PyTypeChecker
         for channel in self.channels:
             channel.detect_cells()
+
+
+            channels_min_list.append(channel.min_and_max[0])
+            channels_max_list.append(channel.min_and_max[1])
+        #
+        self.channels_min_list = channels_min_list
+        self.channels_max_list = channels_max_list
 
         with DebugPlot('cell_detection', 'result', 'rotated') as p:
             self.debug_print_cells(p)
@@ -285,12 +281,12 @@ class Image(AutoRegistrationProvider, AutoRotationProvider, BaseImage):
 
         :param p:
         """
-        p.title("Detected cells")
-        p.imshow(self.image)
+        p.title("Detected cells (mm/image/debug_print_cells)")
+        p.imshow(self.image, cmap = 'bone')
         # noinspection PyTypeChecker
         for channel in self.channels:
             coordinates = channel.get_coordinates()
-            p.poly_drawing_helper(coordinates, lw=1, edgecolor=channel_color, fill=False)
+            p.poly_drawing_helper(coordinates, lw=1.5, edgecolor=channel_color, fill=False)
 
             for cell in channel.cells:
                 coordinates = [
@@ -299,7 +295,8 @@ class Image(AutoRegistrationProvider, AutoRotationProvider, BaseImage):
                     [channel.left, cell.bottom]
                 ]
 
-                p.poly_drawing_helper(coordinates, lw=0.5, edgecolor=cell_color, fill=False)
+                p.poly_drawing_helper(coordinates, lw=1.5, edgecolor=cell_color, fill=False)
+        p.savefig("detected_cells.pdf")
 
     def guess_channel_orientation(self):
         """
@@ -412,5 +409,3 @@ class Image(AutoRegistrationProvider, AutoRotationProvider, BaseImage):
         # quick hack, basically it should call a clean function in the parent class
         if hasattr(self, '_fft_pair_cached'):
             self._fft_pair_cached = False
-
-

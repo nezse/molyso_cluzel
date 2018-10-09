@@ -19,19 +19,22 @@ with warnings.catch_warnings():
 
 _test_image = None
 
-
-def test_image():
+def test_image(name, page):
     """
     Returns a test image (first image of the small dataset).
 
     :return: image
     :rtype: numpy.ndarray
     """
+
+
     global _test_image
-    if _test_image is None:
+    if name == "0":
         t = TiffFile(os.path.join(os.path.dirname(__file__), 'example-frame.tif'))
-        _test_image = t.pages[0].asarray()
-        t.close()
+    else:
+        t = TiffFile(os.path.join(os.path.dirname(__file__), name))
+
+    _test_image = t.pages[page].asarray()
+    t.close()
 
     return _test_image
-

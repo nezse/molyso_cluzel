@@ -26,7 +26,7 @@ from ..generic.tunable import TunableManager, tunable
 
 from ..generic.etc import parse_range, correct_windows_signal_handlers, debug_init, QuickTableDumper, \
     silent_progress_bar, fancy_progress_bar, prettify_numpy_array, bits_to_numpy_type
-
+from ..generic.signal import export_list
 from ..generic.etc import Sqlite3Cache as Cache
 
 from ..imageio.imagestack import MultiImageStack
@@ -63,7 +63,7 @@ def banner():
     """
     return r"""
      \   /\  /\  /                             -------------------------
-      | | |O| | |    molyso                    Developed  2013 - 2018 by
+      | | |O| | |    molyso                    Developed  2013 - 2017 by
       | | | | |O|                              Christian   C.  Sachs  at
       |O| |O| |O|    MOther    machine         ModSim / Microscale Group
       \_/ \_/ \_/    anaLYsis SOftware         Research  Center  Juelich
@@ -120,8 +120,7 @@ def create_argparser():
                            const='everything', type=str, nargs='?')
     argparser.add_argument('-nt', '--no-tracking', dest='no_tracking', default=False, action='store_true')
     argparser.add_argument('-t', '--tunables', dest='tunables', type=str, default=None)
-    argparser.add_argument('-s', '--set-tunable', dest='tunable_list',
-                           type=list, nargs=2, default=None, action='append')
+    argparser.add_argument('-s', '--set-tunable', dest='tunable_list', type=list, nargs=2, default=None, action='append')
     argparser.add_argument('-pt', '--print-tunables', dest='print_tunables', default=False, action='store_true')
     argparser.add_argument('-rt', '--read-tunables', dest='read_tunables', type=str, default=None)
     argparser.add_argument('-wt', '--write-tunables', dest='write_tunables', type=str, default=None)
@@ -162,6 +161,7 @@ def setup_image(i, local_ims, t, pos):
 
     i.calibration_px_to_mu = local_ims.get_meta('calibration', t=t, pos=pos)
 
+
     i.metadata['x'], i.metadata['y'], i.metadata['z'] = local_ims.get_meta('position', t=t, pos=pos)
 
     i.metadata['time'] = i.timepoint
@@ -185,7 +185,6 @@ first_to_look_at = 0
 def check_or_get_first_frame(pos, args):
     """
 
-    :param args:
     :param pos:
     :return:
     """
@@ -201,15 +200,14 @@ def check_or_get_first_frame(pos, args):
 
         setup_image(image, ims, first_to_look_at, pos)
 
-        image.autorotate()
-        image.autoregistration(image)
+        #image.autorotate()
+        # image.autoregistration(image)
 
         if args.detect_once:
             from .channel_detection import find_channels
 
             def _find_channels(im):
                 image._find_channels_positions = find_channels(im)
-                # noinspection PyProtectedMember
                 return image._find_channels_positions
 
             image.find_channels_function = _find_channels
@@ -230,7 +228,6 @@ def processing_frame(args, t, pos, clean=True):
     :param args:
     :param t:
     :param pos:
-    :param clean:
     :return:
     """
 
@@ -255,8 +252,10 @@ def processing_frame(args, t, pos, clean=True):
     if args.detect_once:
         image.angle = first.angle
 
-    image.autorotate()
-    image.autoregistration(first)
+    registration = False
+    if registration:
+        image.autorotate()
+        image.autoregistration(first)
 
     if args.detect_once:
         from ..generic.registration import shift_image
@@ -269,7 +268,6 @@ def processing_frame(args, t, pos, clean=True):
 
         image.shift = [0.0, 0.0]
 
-        # noinspection PyProtectedMember
         def _find_channels_function(im):
             return first._find_channels_positions
 
@@ -287,6 +285,101 @@ def processing_frame(args, t, pos, clean=True):
         image.clean()
 
         image.flatten()
+
+    min_per_image = image.channels_min_list
+    max_per_image = image.channels_max_list
+
+
+
+    # name_file_min = str(t) + "_minima"
+    # export_list(name_file_min, min_per_image)
+    #
+    # name_file_max = str(t) + "_maxima"
+    # export_list(name_file_max, max_per_image)
+
+
+
+
+
+    return image
+def processing_frame(args, t, pos, clean=True):
+    """
+
+    :param args:
+    :param t:
+    :param pos:
+    :return:
+    """
+
+    first = check_or_get_first_frame(pos, args)
+
+    if ims.get_meta('channels') > 1:
+        image = FluorescentImage()
+    else:
+        image = Image()
+
+    setup_image(image, ims, t, pos)
+
+    DebugPlot.set_context(t=t, pos=pos)
+
+    image.keep_channel_image = args.keepchan
+    image.pack_channel_image = args.channel_bits
+
+    if type(image) == FluorescentImage:
+        image.keep_fluorescences_image = args.keepfluorchan
+        image.pack_fluorescences_image = args.channel_fluorescence_bits
+
+    if args.detect_once:
+        image.angle = first.angle
+
+    registration = False
+    if registration:
+        image.autorotate()
+        image.autoregistration(first)
+
+    if args.detect_once:
+        from ..generic.registration import shift_image
+
+        image.image = shift_image(image.image, image.shift)
+
+        if type(image) == FluorescentImage:
+            for n in range(len(image.image_fluorescences)):
+                image.image_fluorescences[n] = shift_image(image.image_fluorescences[n], image.shift)
+
+        image.shift = [0.0, 0.0]
+
+        def _find_channels_function(im):
+            return first._find_channels_positions
+
+        image.find_channels_function = _find_channels_function
+
+    image.find_channels()
+
+    if args.detect_once:
+        delattr(image, 'find_channels_function')
+
+    image.find_cells_in_channels()
+
+    if clean:
+
+        image.clean()
+
+        image.flatten()
+
+    min_per_image = image.channels_min_list
+    max_per_image = image.channels_max_list
+
+
+
+    # name_file_min = str(t) + "_minima"
+    # export_list(name_file_min, min_per_image)
+    #
+    # name_file_max = str(t) + "_maxima"
+    # export_list(name_file_max, max_per_image)
+
+
+
+
 
     return image
 
@@ -371,11 +464,10 @@ def processing_setup(args):
 
 def main():
     """
-
-
     :return: :raise:
     """
     global ims
+    print(" highlevel main ***********************************")
 
     argparser = create_argparser()
 
@@ -397,7 +489,7 @@ def main():
     if not args.nb:
         log.info(banner())
 
-    log.info("Started analysis.")
+    log.info("Started analysis ")
 
     if args.modules:
         setup_modules(args.modules)
@@ -412,10 +504,14 @@ def main():
         hook(args)
 
     if not args.process:
+        log.info("Interactive_main.")
+
         return interactive_main(args)
+
 
     try:
         if not args.ground_truth:
+            print("No ground_truth")
             # noinspection PyUnresolvedReferences
             import matplotlib
 
@@ -436,11 +532,14 @@ def main():
 
     cache = Cache(args.input, ignore_cache=args.ignorecache, cache_token=args.cache_token)
 
+    ####################################################################
     if 'tracking' not in cache:
 
+        log.info('Tracking')
         if 'imageanalysis' in cache:
             results = cache['imageanalysis']
         else:
+
             ims = MultiImageStack.open(args.input)
 
             args.multipoints = parse_range(args.multipoints, maximum=ims.get_meta('multipoints'))
@@ -451,8 +550,8 @@ def main():
 
             log.info("Beginning Processing:")
             dummy = " " * len("XXXX-XX-XX XX:XX:XX.XXX molyso INFO ")
-            log.info(prettify_numpy_array(positions_to_process,  dummy + "Positions : ").strip())
-            log.info(prettify_numpy_array(timepoints_to_process, dummy + "Timepoints: ").strip())
+            # log.info(prettify_numpy_array(positions_to_process,  dummy + "Positions : ").strip())
+            # log.info(prettify_numpy_array(timepoints_to_process, dummy + "Timepoints: ").strip())
 
             results = {pos: {} for pos in positions_to_process}
 
@@ -513,12 +612,17 @@ def main():
 
     if not args.no_tracking:
 
+        log.info('No tracking')
+
         if 'tracking' in cache:
+
+
             # noinspection PyUnboundLocalVariable
             results = None
             del results  # free up some ram?
             tracked_results = cache['tracking']
         else:
+
 
             tracked_results = {}
 
@@ -560,22 +664,28 @@ def main():
             :param inner_tracked_results:
             """
             for inner_pos in sorted(inner_tracked_results.keys()):
+
                 inner_tracking = inner_tracked_results[inner_pos]
                 for inner_k in sorted(inner_tracking.tracker_mapping.keys()):
+
                     inner_tracker = inner_tracking.tracker_mapping[inner_k]
                     inner_channels = inner_tracking.channel_accumulator[inner_k]
                     yield inner_pos, inner_k, inner_tracking, inner_tracker, inner_channels
 
         if args.table_output is None:
+
             recipient = sys.stdout
         else:
             recipient = codecs.open(args.table_output, 'wb+', 'utf-8')
 
         log.info("Outputting tabular data ...")
 
+
         flat_results = list(each_pos_k_tracking_tracker_channels_in_results(tracked_results))
 
+
         try:
+
             table_dumper = QuickTableDumper(recipient=recipient)
 
             iterable = progress_bar(flat_results) if recipient is not sys.stdout else silent_progress_bar(flat_results)
@@ -639,6 +749,7 @@ def main():
                     pylab.close('all')
 
                 del cs
+
 
     # ( Post-Tracking: Just write some tunables, if desired )###########################################################
 

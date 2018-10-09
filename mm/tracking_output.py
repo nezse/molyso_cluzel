@@ -51,18 +51,6 @@ def s_to_h(s):
     return s / (60.0 * 60.0)
 
 
-# noinspection PyUnusedLocal
-def s_to_h_str(s, *args, **kwargs):
-    """
-    converts seconds to hours as a rounded string
-    :param s: seconds
-    :return: hours
-    :param s: seconds
-    :return: hours string
-    """
-    return ("%.2f" % (s_to_h(s),)).replace('.00', '')
-
-
 def catch_index_error(what, otherwise):
     """
     runs callable 'what' and catches IndexErrors, returning 'otherwise' if one occurred
@@ -114,7 +102,6 @@ def plot_timeline(p, channels, cells,
     if figure_presetup:
         figure_presetup(p)
 
-    min_h = float('inf')
     max_h = 0
 
     for cc in channels:
@@ -137,9 +124,6 @@ def plot_timeline(p, channels, cells,
         if cc.bottom > max_h:
             max_h = cc.bottom
 
-        if cc.top < min_h:
-            min_h = cc.top
-
         if show_overlay:
             for cell in cc.cells:
                 coords = [[left, cell.bottom], [right, cell.bottom],
@@ -147,20 +131,10 @@ def plot_timeline(p, channels, cells,
                 poly_drawing_helper(p, coords,
                                     lw=0, edgecolor='r', facecolor='white', fill=True, alpha=0.25, zorder=1.2)
 
-    p.gca().xaxis.set_major_formatter(p.FuncFormatter(s_to_h_str))
-    p.gca().xaxis.set_major_locator(p.MultipleLocator(60.0 * 60.0 * 1))
-    p.gca().xaxis.set_minor_locator(p.MultipleLocator(60.0 * 60.0 * 0.25))
-
-    p.xlabel("Experiment Time [h]")
-    p.ylabel("y [Pixel]")
-
+    p.xlim(time_points[0], time_points[-1])
+    p.ylim(0, max_h)
     p.gca().set_aspect('auto')
     p.gca().set_autoscale_on(True)
-
-    p.xlim(time_points[0], time_points[-1])
-    p.ylim(min_h, max_h)
-
-    p.tight_layout()
 
     if show_overlay:
         time_format_str = '#%0' + str(int(np.log10(len(time_points))) + 1) + 'd' + ' ' \
@@ -295,17 +269,18 @@ def get_object_unique_id(obj):
 
 
 def analyze_tracking(cells, receptor, meta=None):
+    # print("<3*<3*<3*<3*<3 tracking_output / analyze_tracking <3*<3*<3*<3*<3")
     """
 
-    :param meta:
     :param cells:
     :param receptor:
     """
+
     for cell in cells:
         for sn, sa in enumerate(cell.seen_as):
             tmp = {
                 'cell_age': s_to_h(sa.channel.image.timepoint - cell.seen_as[0].channel.image.timepoint),
-                'elongation_rate': catch_index_error(lambda: cell.raw_elongation_rates[sn], float('NaN')),
+                'elongation_rate': sa.channel.image.pixel_to_mu(catch_index_error(lambda: cell.raw_elongation_rates[sn], float('NaN'))),
                 'length': sa.channel.image.pixel_to_mu(sa.length),
                 'uid_track': get_object_unique_id(cell.ultimate_parent),
                 'uid_thiscell': get_object_unique_id(sa),
@@ -332,6 +307,8 @@ def analyze_tracking(cells, receptor, meta=None):
                 'fluorescence_count': len(getattr(sa, 'fluorescences', []))
             }
 
+
+
             for f in range(len(getattr(sa, 'fluorescences', []))):
                 tmp['fluorescence_' + str(f)] = sa.fluorescences[f]
                 tmp['fluorescence_raw_' + str(f)] = sa.fluorescences_raw[f]
@@ -339,3 +316,4 @@ def analyze_tracking(cells, receptor, meta=None):
                 tmp['fluorescence_background_' + str(f)] = sa.channel.image.background_fluorescences[f]
 
             receptor(tmp)
+

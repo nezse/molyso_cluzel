@@ -6,7 +6,12 @@ documentation
 from __future__ import division, unicode_literals, print_function
 
 import warnings
+from ..imageio.imagestack import MultiImageStack
+from ..imageio.imagestack_ometiff import OMETiffStack
 from ..debugging.debugplot import inject_poly_drawing_helper
+import matplotlib.pyplot as plt
+
+OMETiffStack = OMETiffStack
 
 
 def interactive_main(args):
@@ -15,13 +20,14 @@ def interactive_main(args):
     :param args:
     :raise SystemExit:
     """
-    import matplotlib.pyplot as plt
     from matplotlib.widgets import Slider
     from .image import cell_color, channel_color
 
     from .highlevel import processing_frame, processing_setup
 
+    ################Processing
     processing_setup(args)
+    ##########################
 
     from .highlevel import ims
 
@@ -44,13 +50,16 @@ def interactive_main(args):
         multipoint = Slider(ax_mp, 'Multipoint', 0, mp_max, valinit=0, valfmt="%d", color=cell_color)
         timepoint = Slider(ax_tp, 'Timepoint', 0, tp_max, valinit=0, valfmt="%d", color=cell_color)
 
-    env = {'show': True, 'rotated': True, 'fluor_ind': False}
+    env = {'show': True, 'rotated': False, 'fluor_ind': False}
+
 
     def update(_):
         """
 
         :param _:
         """
+
+        # print("Update.")
         t = int(timepoint.val)
         pos = int(multipoint.val)
 
@@ -58,17 +67,16 @@ def interactive_main(args):
 
         inject_poly_drawing_helper(plt)
 
-        plt.rcParams['image.cmap'] = 'gray'
+        plt.rcParams['image.cmap'] = 'bone'
 
         plt.sca(ax)
         plt.cla()
 
-        plt.suptitle("[left/right] timepoint [up/down] multipoint [h] hide analysis [r] toggle rotated (in raw mode)")
+        plt.suptitle('[left/right] timepoint [up/down] multipoint [h] hide analysis [r] toggle rotated (in raw mode)')
 
-        plt.xlabel("x [Pixel]")
-        plt.ylabel("y [Pixel]")
-
+        #####################################################
         i = processing_frame(args, t, pos, clean=False)
+        #####################################################
 
         if env['fluor_ind'] is not False:
             if env['show']:
@@ -79,11 +87,12 @@ def interactive_main(args):
             i.debug_print_cells(plt)
         else:
             if env['rotated']:
-                plt.title("Image (rotated)")
+                plt.title("Image (rotated)", aspect='auto')
                 plt.imshow(i.image)
             else:
+
                 plt.title("Image (raw)")
-                plt.imshow(i.original_image)
+                plt.imshow(i.original_image, aspect='auto')
 
         fig.canvas.set_window_title("Image Viewer - %s timepoint #%d %d/%d multipoint #%d %d/%d" %
                                     (args.input, t, 1+t, 1+tp_max, pos, 1+pos, 1+mp_max))
