@@ -41,6 +41,7 @@ class TrackedPosition(object):
     A TrackedPosition object contains various CellTracker objects for each channel within a multipoint position,
     as well as other information associated with the position.
     """
+
     # print("tracking / TrackedPosition ***********************************")
     def __init__(self):
         self.times = None
@@ -91,6 +92,7 @@ class TrackedPosition(object):
 
             self.logger.info("Skipping channel")
 
+        # import pdb;pdb.set_trace()
         key_list = list(range(len(self.first)))
 
         self.tracker_mapping = {c: CellTracker() for c in key_list}
@@ -146,11 +148,12 @@ class TrackedPosition(object):
         Removes empty channels from the data set.
 
         """
+        # import pdb;pdb.set_trace()
         cell_means = {k: (float(sum(v)) / len(v)) if len(v) > 0 else 0.0 for k, v in self.cell_counts.items()}
-
+        threshold = tunable('tracking.empty_channel_filtering.minimum_mean_cells', 1.0,
+                            description="For empty channel removal, minimum of cell mean per channel.")
         for k, mean_cell_count in cell_means.items():
-            if mean_cell_count < tunable('tracking.empty_channel_filtering.minimum_mean_cells', 2.0,
-                                         description="For empty channel removal, minimum of cell mean per channel."):
+            if mean_cell_count < threshold:
                 del self.tracker_mapping[k]
                 del self.channel_accumulator[k]
                 del self.cell_counts[k]
@@ -214,6 +217,7 @@ class TrackedPosition(object):
         """
 
         print("<3<3<3<3<3 tracking / perform_tracking")
+        # import pdb;pdb.set_trace()
         for c in self.tracker_mapping.keys():
             tracker = self.tracker_mapping[c]
             channel_list = self.channel_accumulator[c]
@@ -234,7 +238,7 @@ class TrackedPosition(object):
         Removes empty channels after tracking.
 
         """
-        minimum_average_cells = tunable('tracking.empty_channel_filtering.minimum_mean_cells', 2.0,
+        minimum_average_cells = tunable('tracking.empty_channel_filtering.minimum_mean_cells', 1.0,
                                         description="For empty channel removal, minimum of cell mean per channel.")
         should_skip = True
         for k, tracker in list(self.tracker_mapping.items()):
@@ -343,7 +347,8 @@ def analyse_cell_fates(tracker, previous_cells, current_cells):
                 :param other_cell:
                 :return:
                 """
-                cost = 0.5 * abs(one_cell.top + shift_upper - other_cell.top) + 0.5 * abs(one_cell.bottom + shift_lower - other_cell.bottom)
+                cost = 0.5 * abs(one_cell.top + shift_upper - other_cell.top) + 0.5 * abs(
+                    one_cell.bottom + shift_lower - other_cell.bottom)
 
                 shrinkage = other_cell.length - (one_cell.length + putative_elongation)
 

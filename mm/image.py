@@ -7,8 +7,6 @@
 from __future__ import division, unicode_literals, print_function
 
 import math
-import warnings
-
 from ..generic.signal import fit_to_type
 from ..generic.rotation import find_rotation, apply_rotate_and_cleanup
 from ..generic.registration import translation_2x1d
@@ -122,6 +120,7 @@ class AutoRotationProvider(object):
 
     def rotate(self, angle):
         self.image, self.angle, self.crop_height, self.crop_width = apply_rotate_and_cleanup(self.image, angle)
+
 
 # noinspection PyUnresolvedReferences
 class AutoRegistrationProvider(object):
@@ -409,3 +408,5 @@ class Image(AutoRegistrationProvider, AutoRotationProvider, BaseImage):
         # quick hack, basically it should call a clean function in the parent class
         if hasattr(self, '_fft_pair_cached'):
             self._fft_pair_cached = False
+
+

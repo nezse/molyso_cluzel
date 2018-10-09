@@ -120,7 +120,8 @@ def create_argparser():
                            const='everything', type=str, nargs='?')
     argparser.add_argument('-nt', '--no-tracking', dest='no_tracking', default=False, action='store_true')
     argparser.add_argument('-t', '--tunables', dest='tunables', type=str, default=None)
-    argparser.add_argument('-s', '--set-tunable', dest='tunable_list', type=list, nargs=2, default=None, action='append')
+    argparser.add_argument('-s', '--set-tunable', dest='tunable_list', type=list, nargs=2, default=None,
+                           action='append')
     argparser.add_argument('-pt', '--print-tunables', dest='print_tunables', default=False, action='store_true')
     argparser.add_argument('-rt', '--read-tunables', dest='read_tunables', type=str, default=None)
     argparser.add_argument('-wt', '--write-tunables', dest='write_tunables', type=str, default=None)
@@ -161,7 +162,6 @@ def setup_image(i, local_ims, t, pos):
 
     i.calibration_px_to_mu = local_ims.get_meta('calibration', t=t, pos=pos)
 
-
     i.metadata['x'], i.metadata['y'], i.metadata['z'] = local_ims.get_meta('position', t=t, pos=pos)
 
     i.metadata['time'] = i.timepoint
@@ -200,7 +200,7 @@ def check_or_get_first_frame(pos, args):
 
         setup_image(image, ims, first_to_look_at, pos)
 
-        #image.autorotate()
+        # image.autorotate()
         # image.autoregistration(image)
 
         if args.detect_once:
@@ -281,15 +281,14 @@ def processing_frame(args, t, pos, clean=True):
     image.find_cells_in_channels()
 
     if clean:
+        pass;
 
-        image.clean()
+        # image.clean()
 
-        image.flatten()
+        # image.flatten()
 
     min_per_image = image.channels_min_list
     max_per_image = image.channels_max_list
-
-
 
     # name_file_min = str(t) + "_minima"
     # export_list(name_file_min, min_per_image)
@@ -297,11 +296,9 @@ def processing_frame(args, t, pos, clean=True):
     # name_file_max = str(t) + "_maxima"
     # export_list(name_file_max, max_per_image)
 
-
-
-
-
     return image
+
+
 def processing_frame(args, t, pos, clean=True):
     """
 
@@ -361,25 +358,20 @@ def processing_frame(args, t, pos, clean=True):
     image.find_cells_in_channels()
 
     if clean:
+        pass;
 
-        image.clean()
+        # image.clean()
 
-        image.flatten()
+        # image.flatten()
 
     min_per_image = image.channels_min_list
     max_per_image = image.channels_max_list
-
-
 
     # name_file_min = str(t) + "_minima"
     # export_list(name_file_min, min_per_image)
     #
     # name_file_max = str(t) + "_maxima"
     # export_list(name_file_max, max_per_image)
-
-
-
-
 
     return image
 
@@ -508,7 +500,6 @@ def main():
 
         return interactive_main(args)
 
-
     try:
         if not args.ground_truth:
             print("No ground_truth")
@@ -533,6 +524,13 @@ def main():
     cache = Cache(args.input, ignore_cache=args.ignorecache, cache_token=args.cache_token)
 
     ####################################################################
+
+    # move it out from tracking part, since this information may also need to be
+    # used in ground truth mode
+    ims = MultiImageStack.open(args.input)
+    args.positions_to_process = parse_range(args.multipoints, maximum=ims.get_meta('multipoints'))
+    args.timepoints_to_process = parse_range(args.timepoints, maximum=ims.get_meta('timepoints'))
+
     if 'tracking' not in cache:
 
         log.info('Tracking')
@@ -540,35 +538,28 @@ def main():
             results = cache['imageanalysis']
         else:
 
-            ims = MultiImageStack.open(args.input)
-
-            args.multipoints = parse_range(args.multipoints, maximum=ims.get_meta('multipoints'))
-            args.timepoints = parse_range(args.timepoints, maximum=ims.get_meta('timepoints'))
-
-            positions_to_process = args.multipoints
-            timepoints_to_process = args.timepoints
-
             log.info("Beginning Processing:")
             dummy = " " * len("XXXX-XX-XX XX:XX:XX.XXX molyso INFO ")
-            # log.info(prettify_numpy_array(positions_to_process,  dummy + "Positions : ").strip())
-            # log.info(prettify_numpy_array(timepoints_to_process, dummy + "Timepoints: ").strip())
+            # log.info(prettify_numpy_array(args.positions_to_process,  dummy + "Positions : ").strip())
+            # log.info(prettify_numpy_array(args.timepoints_to_process, dummy + "Timepoints: ").strip())
 
-            results = {pos: {} for pos in positions_to_process}
+            results = {pos: {} for pos in args.positions_to_process}
 
-            total = len(timepoints_to_process) * len(positions_to_process)
+            total = len(args.timepoints_to_process) * len(args.positions_to_process)
 
             if args.mp < 0:
                 args.mp = multiprocessing.cpu_count()
 
             log.info("Performing image analysis ...")
 
-            to_process = list(itertools.product(timepoints_to_process, positions_to_process))
+            to_process = list(itertools.product(args.timepoints_to_process, args.positions_to_process))
 
             if args.mp == 0:
                 processing_setup(args)
 
                 for t, pos in progress_bar(to_process):
-                    results[pos][t] = processing_frame(args, t, pos)
+                    results[pos][t] = processing_frame(args, t, pos, False)
+
             else:
 
                 # ims = None
@@ -606,9 +597,43 @@ def main():
                 except StopIteration:
                     pass
 
-            cache['imageanalysis'] = results
+            # cache['imageanalysis'] = results
 
     ####################################################################################################################
+    def load_all_images():
+
+        for pos in args.positions_to_process:
+
+            # all channels in one time point share same image
+            chan_num_list = list(tracked_results[pos].channel_accumulator.keys());
+            chan_num = chan_num_list[0];
+
+            for timepoint, channel in enumerate(tracked_results[pos].channel_accumulator[chan_num]):
+                print(timepoint, channel.image.timepoint);
+                # only one FP now: TODO general it later
+                fluorescences_count = 0;
+
+                # if (channel.cells.cells_list) :
+                # channel.cells.cells_list[0].channel.image.image_fluorescences[fluorescences_count] = cache.get_image(pos, chan_num, timepoint, fluorescences_count);
+                channel.image.image_fluorescences[fluorescences_count] = cache.get_image(pos, chan_num, timepoint,
+                                                                                         fluorescences_count);
+
+                # tracked_results[pos].channel_accumulator[chan_num][timepoint].image.image_fluorescences[fluorescences_count] = cache.get_image(pos, chan_num, timepoint, fluorescences_count);
+
+    def clear_all_images():
+
+        for pos in args.positions_to_process:
+
+            chan_num_list = list(tracked_results[pos].channel_accumulator.keys());
+            chan_num = chan_num_list[0];
+
+            # all channels in one time point share same image
+            for timepoint, channel in enumerate(tracked_results[pos].channel_accumulator[chan_num]):
+                for fluorescences_count in range(len(channel.image.image_fluorescences)):
+                    cache.set_image(pos, chan_num, timepoint, fluorescences_count,
+                                    channel.image.image_fluorescences[fluorescences_count]);
+                channel.image.clean();
+                # channel.image.flatten()
 
     if not args.no_tracking:
 
@@ -616,13 +641,13 @@ def main():
 
         if 'tracking' in cache:
 
-
             # noinspection PyUnboundLocalVariable
             results = None
             del results  # free up some ram?
             tracked_results = cache['tracking']
-        else:
+            load_all_images()
 
+        else:
 
             tracked_results = {}
 
@@ -648,13 +673,33 @@ def main():
                 tracked_position.perform_tracking(progress_indicator=pi)
                 tracked_position.remove_empty_channels_post_tracking()
 
-            cache['tracking'] = tracked_results
+            # so that cache can be saved properly
+            # clear_all_images()
 
+            # cache['tracking'] = tracked_results
+        first_pos = args.positions_to_process[0];
+        first_channel_num = list(tracked_results[first_pos].channel_accumulator.keys())[0];
+        tracked_timepoints = [timepoint for timepoint, channel in
+                              enumerate(tracked_results[first_pos].channel_accumulator[first_channel_num])];
+        assert (tracked_timepoints == args.timepoints_to_process);
         # ( Diversion into ground truth processing, if applicable )
 
         if args.ground_truth:
-            interactive_ground_truth_main(args, tracked_results)
-            return
+
+            tracked_results = interactive_ground_truth_main(args, tracked_results);
+
+            # Update fluorescence
+            # TODO args.positions_to_process, relationship with tracked_results[pos]
+            for pos in args.positions_to_process:
+                for chan_num in list(tracked_results[pos].channel_accumulator.keys()):
+                    for timepoint, channel in enumerate(tracked_results[pos].channel_accumulator[chan_num]):
+                        channel.cells.cells_list[0].UpdateFluorescence();
+                        # tracked_results[0].tracker_mapping[0].origins[0].seen_as[0].UpdateFluorescence();
+
+        # force them to be empty to ensure informatio would not come from there
+        cache['imageanalysis'] = [];
+        results = [];
+        log.info("cache['imageanalysis'] and results are set to be null.")
 
         # ( Output of textual results: )################################################################################
 
@@ -667,7 +712,6 @@ def main():
 
                 inner_tracking = inner_tracked_results[inner_pos]
                 for inner_k in sorted(inner_tracking.tracker_mapping.keys()):
-
                     inner_tracker = inner_tracking.tracker_mapping[inner_k]
                     inner_channels = inner_tracking.channel_accumulator[inner_k]
                     yield inner_pos, inner_k, inner_tracking, inner_tracker, inner_channels
@@ -680,9 +724,7 @@ def main():
 
         log.info("Outputting tabular data ...")
 
-
         flat_results = list(each_pos_k_tracking_tracker_channels_in_results(tracked_results))
-
 
         try:
 
@@ -723,7 +765,13 @@ def main():
             else:
                 args.tracking_output_format = set(''.join(sublist) for sublist in args.tracking_output_format)
 
+            # k is the chan_num
             for pos, k, tracking, tracker, channels in progress_bar(flat_results):
+
+                # TODO if some channels are not modified
+                # skip saving it
+                # if tracked_results :
+                #    pass;
 
                 tracking_filename = "%(dir)s/tracking_pt_%(mp)02d_chan_%(k)02d" % \
                                     {'dir': figures_directory, 'mp': pos, 'k': k}
@@ -750,6 +798,9 @@ def main():
 
                 del cs
 
+        # so that cache can be saved properly
+        clear_all_images()
+        cache['tracking'] = tracked_results;
 
     # ( Post-Tracking: Just write some tunables, if desired )###########################################################
 

@@ -641,6 +641,7 @@ def find_channels(image):
 
     method_to_use = tunable(
         'channels.vertical.method',
+
         'None', #alternate
         description="For channel detection, vertical method to use (either alternate, recursive ). None if is pre-cutted, then the boundaries are the limits of the picture")
 

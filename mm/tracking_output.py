@@ -104,6 +104,7 @@ def plot_timeline(p, channels, cells,
 
     max_h = 0
 
+    #import pdb;pdb.set_trace()
     for cc in channels:
         time_point = cc.image.timepoint
         bs = np.searchsorted(time_points, time_point, side='right')
@@ -310,7 +311,9 @@ def analyze_tracking(cells, receptor, meta=None):
 
 
             for f in range(len(getattr(sa, 'fluorescences', []))):
-                tmp['fluorescence_' + str(f)] = sa.fluorescences[f]
+                tmp['fluorescence_mean_' + str(f)] = sa.fluorescences[f]
+                tmp['fluorescence_total_' + str(f)] = sa.fluorescences_in_total[f]
+                tmp['fluorescences_region_size_num_' + str(f)] = sa.fluorescences_region_size_num[f]
                 tmp['fluorescence_raw_' + str(f)] = sa.fluorescences_raw[f]
                 tmp['fluorescence_std_' + str(f)] = sa.fluorescences_std[f]
                 tmp['fluorescence_background_' + str(f)] = sa.channel.image.background_fluorescences[f]
