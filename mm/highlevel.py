@@ -284,88 +284,10 @@ def processing_frame(args, t, pos, clean=True):
         pass;
 
         # image.clean()
-
         # image.flatten()
 
-    min_per_image = image.channels_min_list
-    max_per_image = image.channels_max_list
-
-    # name_file_min = str(t) + "_minima"
-    # export_list(name_file_min, min_per_image)
-    #
-    # name_file_max = str(t) + "_maxima"
-    # export_list(name_file_max, max_per_image)
-
-    return image
-
-
-def processing_frame(args, t, pos, clean=True):
-    """
-
-    :param args:
-    :param t:
-    :param pos:
-    :return:
-    """
-
-    first = check_or_get_first_frame(pos, args)
-
-    if ims.get_meta('channels') > 1:
-        image = FluorescentImage()
-    else:
-        image = Image()
-
-    setup_image(image, ims, t, pos)
-
-    DebugPlot.set_context(t=t, pos=pos)
-
-    image.keep_channel_image = args.keepchan
-    image.pack_channel_image = args.channel_bits
-
-    if type(image) == FluorescentImage:
-        image.keep_fluorescences_image = args.keepfluorchan
-        image.pack_fluorescences_image = args.channel_fluorescence_bits
-
-    if args.detect_once:
-        image.angle = first.angle
-
-    registration = False
-    if registration:
-        image.autorotate()
-        image.autoregistration(first)
-
-    if args.detect_once:
-        from ..generic.registration import shift_image
-
-        image.image = shift_image(image.image, image.shift)
-
-        if type(image) == FluorescentImage:
-            for n in range(len(image.image_fluorescences)):
-                image.image_fluorescences[n] = shift_image(image.image_fluorescences[n], image.shift)
-
-        image.shift = [0.0, 0.0]
-
-        def _find_channels_function(im):
-            return first._find_channels_positions
-
-        image.find_channels_function = _find_channels_function
-
-    image.find_channels()
-
-    if args.detect_once:
-        delattr(image, 'find_channels_function')
-
-    image.find_cells_in_channels()
-
-    if clean:
-        pass;
-
-        # image.clean()
-
-        # image.flatten()
-
-    min_per_image = image.channels_min_list
-    max_per_image = image.channels_max_list
+    # min_per_image = image.channels_min_list
+    # max_per_image = image.channels_max_list
 
     # name_file_min = str(t) + "_minima"
     # export_list(name_file_min, min_per_image)

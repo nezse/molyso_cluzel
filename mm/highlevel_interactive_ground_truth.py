@@ -12,6 +12,8 @@ from ..generic.etc import QuickTableDumper
 from enum import Enum;
 from numpy.linalg import norm;
 from math import floor, ceil, hypot;
+from ..BayesianCorrection.WithinCellCycleBayesianCellSegmentation import \
+    WithinCellCycleBayesianCellSegmentation;
 
 try:
     # noinspection PyUnresolvedReferences
@@ -39,6 +41,7 @@ def interactive_ground_truth_main(args, tracked_results):
         AllLowerPosition = 4
         RectangleSelector = 5
         RectangleSelectorErased = 6
+        SemiAutomaticCorrectionManualRange = 7
 
     pos = args.positions_to_process[0];
     assert (len(args.positions_to_process) == 1);
@@ -76,7 +79,7 @@ def interactive_ground_truth_main(args, tracked_results):
 
         """
         with open(ground_truth_data, 'wb+') as inner_fp:
-            pickle.dump(all_envs, inner_fp, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump(all_envs, inner_fp)
             print("Saved data to %s" % (ground_truth_data,))
 
     lowest_position = min(acceptable_pos_chans.keys())
@@ -89,8 +92,9 @@ def interactive_ground_truth_main(args, tracked_results):
     toContinue['value'] = True;
 
     # rectangle selection recorder
-    rectangle_selection_top_recorder = [False] * (len(tracked_results[pos].channel_accumulator[0]));
-    rectangle_selection_bottom_recorder = [False] * (len(tracked_results[pos].channel_accumulator[0]));
+    cnum = list(tracked_results[pos].channel_accumulator.keys())[0];
+    rectangle_selection_top_recorder = [False] * (len(tracked_results[pos].channel_accumulator[cnum]));
+    rectangle_selection_bottom_recorder = [False] * (len(tracked_results[pos].channel_accumulator[cnum]));
 
     def perform_it():
         """
@@ -169,7 +173,8 @@ def interactive_ground_truth_main(args, tracked_results):
         # plt.subplots_adjust(left=0.25, bottom=0.25)
         # plt.subplots_adjust(top=0.9)
 
-        if len(tracked_results[0].channel_accumulator[0]) == len(args.timepoints_to_process):
+        cnum = list(tracked_results[pos].channel_accumulator.keys())[0];
+        if len(tracked_results[0].channel_accumulator[cnum]) == len(args.timepoints_to_process):
             fig.canvas.set_window_title("Default mode: channel " + str(chan_num))
         else:
             fig.canvas.set_window_title("Certain frames were excluded from analysis: channel " + str(chan_num))
@@ -277,11 +282,16 @@ def interactive_ground_truth_main(args, tracked_results):
             b        edit lower bound of a cell; twice to exit current mode
             ctrl + b edit lower bound of all cells; twice to exit current mode
             ctrl + r rectangle selector mode
+
+            1        semi-automatic correction with manual range
+            2        modify parameters for semi-automatic correction
             """)
 
         refresh()
 
         show_help()
+
+        semiAutomaticCorrection_varianceOfGrowth = 0.12;
 
         def click(e):
             """
@@ -303,6 +313,7 @@ def interactive_ground_truth_main(args, tracked_results):
                     timepoint = x_coordinate_to_timepoint(x, round);
                     tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[0].local_top = y;
                     plotTop.remove();
+                    plotBottom.remove();
                     show_cell_bounaries();
                     return;
 
@@ -310,6 +321,7 @@ def interactive_ground_truth_main(args, tracked_results):
 
                     timepoint = x_coordinate_to_timepoint(x, round);
                     tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[0].local_bottom = y;
+                    plotTop.remove();
                     plotBottom.remove();
                     show_cell_bounaries();
                     return;
@@ -361,7 +373,55 @@ def interactive_ground_truth_main(args, tracked_results):
                     plotBottom.remove();
                     show_cell_bounaries();
 
+                elif mode == Mode.SemiAutomaticCorrectionManualRange:
 
+                    numOfEachSideSelection = 10;
+                    iteration = 100;
+                    minGrowthRate = 0.3;
+                    maxGrowthRate = 0.55;
+
+                    nonlocal semiAutomaticCorrection_varianceOfGrowth;
+                    varianceOfGrowth = semiAutomaticCorrection_varianceOfGrowth;
+
+                    startTimepoint = x_coordinate_to_timepoint(x, round);
+                    tracked_results[pos].channel_accumulator[chan_num][startTimepoint].cells.cells_list[
+                        0].local_bottom = y;
+
+                    timeInterval = (tracked_results[pos].channel_accumulator[chan_num][
+                                        startTimepoint + 1].image.timepoint -
+                                    tracked_results[pos].channel_accumulator[chan_num][
+                                        startTimepoint].image.timepoint) / 60 / 60;
+                    pixelToLength = tracked_results[pos].channel_accumulator[chan_num][
+                        startTimepoint].image.calibration_px_to_mu;
+                    print(timeInterval, pixelToLength);
+
+                    lowerBound = max(startTimepoint - numOfEachSideSelection, 0);
+                    upperBound = min(startTimepoint + numOfEachSideSelection,
+                                     len(tracked_results[pos].channel_accumulator[chan_num]) - 1);
+                    rangeOfCell = range(lowerBound, upperBound + 1);
+
+                    observedLength = [0] * len(rangeOfCell);
+                    for i in range(len(rangeOfCell)):
+                        timepoint = rangeOfCell[i];
+                        observedLength[i] = (tracked_results[pos].channel_accumulator[chan_num][
+                                                 timepoint].cells.cells_list[0].local_bottom -
+                                             tracked_results[pos].channel_accumulator[chan_num][
+                                                 timepoint].cells.cells_list[0].local_top) * pixelToLength;
+
+                    estimator = WithinCellCycleBayesianCellSegmentation(varianceOfGrowth, timeInterval, minGrowthRate,
+                                                                        maxGrowthRate);
+                    inferredLength = estimator.Inference(observedLength, iteration);
+
+                    for i in range(len(rangeOfCell)):
+                        timepoint = rangeOfCell[i];
+                        tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[0].local_bottom = \
+                        tracked_results[pos].channel_accumulator[chan_num][timepoint].cells.cells_list[0].local_top + \
+                        inferredLength[i] / pixelToLength;
+
+                    plotBottom.remove();
+                    show_cell_bounaries();
+
+                    print("varianceOfGrowth: ", varianceOfGrowth);
 
             elif e.button == 3:
                 last_point_x, last_point_y = env['last_point_x'], env['last_point_y']
@@ -402,7 +462,8 @@ def interactive_ground_truth_main(args, tracked_results):
         def ModeToggleSwitch(mode, targetMode, title):
             if mode == targetMode:
                 mode = Mode.Default
-                if len(tracked_results[0].channel_accumulator[0]) == len(args.timepoints_to_process):
+                cnum = list(tracked_results[pos].channel_accumulator.keys())[0];
+                if len(tracked_results[0].channel_accumulator[cnum]) == len(args.timepoints_to_process):
                     fig.canvas.set_window_title("Default mode: channel " + str(chan_num))
                 else:
                     fig.canvas.set_window_title("Certain frames were excluded from analysis: channel " + str(chan_num))
@@ -547,7 +608,6 @@ def interactive_ground_truth_main(args, tracked_results):
                 mode = ModeToggleSwitch(mode, Mode.AllLowerPosition, "Editing ALL cells' bottom bounday");
             elif event.key == 'ctrl+r':
                 mode = ModeToggleSwitch(mode, Mode.RectangleSelector, "Rectangle Selector");
-
             elif event.key == 'ctrl+e':
 
                 mode = ModeToggleSwitch(mode, Mode.RectangleSelectorErased, "Rectangle Selector Erased.");
@@ -564,6 +624,12 @@ def interactive_ground_truth_main(args, tracked_results):
                     plotSelection.remove();
                     plotSelection, = plt.plot(0, 0);
                     return;
+            elif event.key == '1':
+                mode = ModeToggleSwitch(mode, Mode.SemiAutomaticCorrectionManualRange,
+                                        "Semi-automatic Correction with Manual Range.");
+            elif event.key == '2':
+                nonlocal semiAutomaticCorrection_varianceOfGrowth;
+                semiAutomaticCorrection_varianceOfGrowth = float(input("Please enter varianceOfGrowth: "));
 
             toContinue['value'] = True;
 
